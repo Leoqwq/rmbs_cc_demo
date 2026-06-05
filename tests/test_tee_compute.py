@@ -48,3 +48,34 @@ def test_signature_recovers_to_signer_address():
     sig = sign_result(h, pk)
     recovered = Account.recover_message(encode_defunct(primitive=h), signature=sig)
     assert recovered == get_signer(pk)
+
+
+import os
+from fastapi.testclient import TestClient
+
+
+def test_compute_endpoint_matches_pure_function_and_verifies_signature():
+    os.environ["TEE_PRIVATE_KEY"] = (
+        "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+    )
+    from tee.tee_service import app  # import after env set
+
+    client = TestClient(app)
+    resp = client.post(
+        "/compute",
+        json={"dealId": "TEST_SEQ_2024", "period": 1, "iaf": 500000, "paf": 1000000},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is True
+
+    expected = compute_waterfall(iaf=500000.0, paf=1000000.0, period=1)
+    assert body["result"] == expected
+    assert body["resultHash"] == result_hash(expected).hex()
+
+    # signature recovers to the advertised TEE address
+    sig = bytes.fromhex(body["signature"][2:])
+    recovered = Account.recover_message(
+        encode_defunct(primitive=result_hash(expected)), signature=sig
+    )
+    assert recovered == body["teeAddress"]
