@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pydantic
+web3
+eth-account
+requests
+python-dotenv
+jsonschema
+pytest
+httpx
