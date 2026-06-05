@@ -50,6 +50,35 @@ waterfall"即可，其余一切从简。
   `basic_sequential_deal` fixture——三层 A1/A2/B，IAF/PAF 两个资金池，利息按票面利率、
   本金按顺序/比例偿付，无触发器、无 Net WAC、无损失分配启用。
 
+### 2.3 TEE 机密虚拟机（运算节点，已创建）
+
+TEE 作为 confidential compute 的运算节点，是 GCP 上的一台 **Confidential VM**，与 6 节点
+私有链建在**同一 project、同一 VPC** 下。
+
+**配置取舍（思考过程）：**
+- 现有 6 节点用的是 `e2-custom-2-6144`（e2 系列），但 **e2 系列不支持机密计算**，所以 TEE
+  不能简单"租一个一样大小的"，必须换到支持机密计算的机型。
+- 机密计算技术三选一：**AMD SEV-SNP（N2D）** / Intel TDX（C3）/ AMD SEV（旧版）。选用
+  **AMD SEV-SNP**——与现有 AMD 友好环境一致、`us-central1` 支持好、价格较低、支持远程证明
+  (attestation，本 demo 暂不依赖，留作后续)。
+- 机型选 **`n2d-standard-2`（2 vCPU / 8 GB）**——与 validator（2 vCPU/6 GB）最接近的"同等
+  大小"机密机型（N2D 最小标准档即 8 GB）。该节点只跑一个轻量 FastAPI 算 waterfall，资源
+  绰绰有余；本 demo 中 **TEE 只做计算、不连链**（连链的是本地编排器），故无需大磁盘/高性能。
+- 维护策略强制 `TERMINATE`（机密 VM 不支持热迁移）。
+- 沿用链节点的安全模型：**无外网 IP**、内网静态 IP、`ubuntu-2204-lts` 镜像、用完即停。
+
+**已创建实例（事实记录）：**
+- 名称 `tee-node`，zone `us-central1-a`，机型 `n2d-standard-2`，`--confidential-compute-type=SEV_SNP`，`--min-cpu-platform="AMD Milan"`，`--maintenance-policy=TERMINATE`。
+- network `besu-net` / subnet `chain-a`，内网静态 IP **`10.20.1.30`**（避开已用的 .10/.21/.22），无外网 IP。
+- 镜像 `ubuntu-2204-lts`，启动盘 30GB `pd-standard`，STATUS = RUNNING。
+
+**连接方式：** 该 VM 无外网 IP，本地编排器经 **IAP SSH 本地端口转发**访问 TEE 服务端口
+（8000），复用既有 `allow-ssh-iap`（tcp:22）规则，**无需新增防火墙规则**：
+`gcloud compute ssh tee-node --zone=us-central1-a --tunnel-through-iap -- -L 8000:localhost:8000`，
+编排器中 TEE 地址即填 `http://localhost:8000`。
+
+完整创建命令与说明见 `/Users/leo/Desktop/Obsidian/RMBS/private_chain/TEE.md`。
+
 ## 3. 总体架构与数据流
 
 对照 Figure 1：**Besu 私有链 = 去中心化共识那一环**；TEE 只负责算 waterfall；合约只存
@@ -125,9 +154,12 @@ function getResult(uint256 id) view returns (...);
 
 ## 6. 启动/运行顺序（纯 CLI）
 
-1. 用户用 `gcloud ... start-iap-tunnel validator-1 8545 → localhost:8545` 接通链。
+1. 启动两条 IAP 隧道：
+   - 链 RPC：`gcloud ... start-iap-tunnel validator-1 8545 --local-host-port=localhost:8545`；
+   - TEE 服务：`gcloud compute ssh tee-node --zone=us-central1-a --tunnel-through-iap -- -L 8000:localhost:8000`。
 2. `forge script Deploy.s.sol --rpc-url localhost:8545 --broadcast` 部署合约（带入 TEE 地址）。
-3. `python tee/tee_service.py`（本地；将来换成云上 URL 只改 config）。
+3. 在 `tee-node` 上运行 `tee/tee_service.py`（监听 8000）。开发期也可先在本地起，联调时切到
+   tee-node；编排器只认 `http://localhost:8000`（经隧道）。
 4. `python orchestrator.py`（开始监听）。
 5. `python submit_request.py --iaf 500000 --paf 1000000` → 终端逐段打印 ①~⑥ 流转，
    最后 `getResult` 打印 TEE 算出的各档余额。
@@ -149,4 +181,7 @@ function getResult(uint256 id) view returns (...);
 
 - 链节点当前停用，部署与联调需用户先启用并建立 IAP tunnel。
 - 部署者私钥仅由用户填入配置，仓库内留空。
-- TEE 现为本地进程；迁移到云上 TEE 时仅改 `orchestrator.py` 的 TEE URL 与（如需）地址配置。
+- TEE 机密 VM（`tee-node` / `10.20.1.30`）已创建但默认停机；联调前需 `instances start` 并建立
+  IAP SSH 端口转发（8000）。TEE 的结果签名 ETH 私钥由 TEE 服务自身生成（与 VM 无关），其地址
+  在部署时写入合约。
+- 链节点与 TEE 节点用完即 `instances stop` 控制成本（仅余磁盘费）。
