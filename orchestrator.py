@@ -75,7 +75,7 @@ def _post_result(chain: ResilientChain, admin_pk: str, admin_address: str,
                 "from": admin_address,
                 "nonce": w3.eth.get_transaction_count(admin_address),
                 "gas": 800000,
-                "gasPrice": 0,
+                "gasPrice": w3.eth.gas_price,
                 "chainId": chain_id,
             }
         )

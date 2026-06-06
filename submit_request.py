@@ -42,7 +42,7 @@ def main():
             "from": acct.address,
             "nonce": w3.eth.get_transaction_count(acct.address),
             "gas": 400000,
-            "gasPrice": 0,
+            "gasPrice": w3.eth.gas_price,
             "chainId": CHAIN_ID,
         }
     )
