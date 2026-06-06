@@ -7,10 +7,14 @@ the TEE-signed result is written back on-chain. Encryption is intentionally
 omitted — the goal is to prove confidential compute can run the waterfall.
 
 See `docs/superpowers/specs/2026-06-03-rmbs-cc-waterfall-demo-design.md` for the
-design and `private_chain/TEE.md` (in the RMBS vault) for the TEE VM.
+design, `private_chain/TEE.md` (in the RMBS vault) for the TEE VM, and
+**`RUNBOOK.md` for the full, tested step-by-step end-to-end procedure** (start
+here if you're actually running the demo).
 
 ## Prerequisites
-- Foundry (`forge`), Python 3.11+
+- Local: Foundry (`forge`), Python 3.10+.
+- `tee-node` (Ubuntu): `sudo apt-get install -y python3-venv python3-pip` before
+  creating the venv there.
 - The Besu chain and the `tee-node` confidential VM started (both are stopped by
   default to control cost).
 
@@ -19,32 +23,38 @@ design and `private_chain/TEE.md` (in the RMBS vault) for the TEE VM.
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # then fill in DEPLOYER_PRIVATE_KEY, CONTRACT_ADDRESS, TEE_ADDRESS
-forge install foundry-rs/forge-std --no-commit
+forge install foundry-rs/forge-std
 forge build
 ```
 
 ## Run the demo
 Open separate terminals.
 
-1. **Tunnels** (chain RPC + TEE service):
+1. **Tunnels** (chain RPC + TEE service). Use `127.0.0.1` (not `localhost`): the
+   Besu RPC host-allowlist only permits `127.0.0.1`, and forcing IPv4 avoids the
+   `::1` connect-refused on the TEE forward.
    ```bash
    gcloud compute start-iap-tunnel validator-1 8545 \
-     --local-host-port=localhost:8545 --zone=us-central1-a
+     --local-host-port=127.0.0.1:8545 --zone=us-central1-a
    gcloud compute ssh tee-node --zone=us-central1-a --tunnel-through-iap \
-     -- -L 8000:localhost:8000
+     -- -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 8000:127.0.0.1:8000
    ```
-2. **TEE service** (on tee-node, or locally during dev). Note the printed TEE
-   address and put it in `.env` as `TEE_ADDRESS`:
+2. **TEE service** — run it on `tee-node` under `tmux` (so it survives SSH/tunnel
+   drops). Note the printed TEE address and put it in `.env` as `TEE_ADDRESS`:
    ```bash
-   python -m tee.tee_service
+   tmux new -s tee
+   cd ~/rmbs_cc_demo && source .venv/bin/activate && python -m tee.tee_service
+   # Ctrl-b then d to detach; service keeps running
    ```
 3. **Deploy the contract** (uses `TEE_ADDRESS`, `DEPLOYER_PRIVATE_KEY`). Put the
    printed address in `.env` as `CONTRACT_ADDRESS`:
    ```bash
-   source .env
-   forge script script/Deploy.s.sol:Deploy --rpc-url "$RPC_URL" \
-     --broadcast --legacy --gas-price 0
+   set -a; source .env; set +a     # export so forge sees the vars
+   forge script script/Deploy.s.sol:Deploy --rpc-url "$RPC_URL" --broadcast --legacy
    ```
+   > The chain is not actually gas-free (validators didn't set `--min-gas-price=0`),
+   > so do NOT pass `--gas-price 0`; forge legacy uses the node's price. The Python
+   > scripts likewise use `w3.eth.gas_price`.
 4. **Orchestrator**:
    ```bash
    python orchestrator.py
@@ -75,9 +85,9 @@ doesn't stall the compute path either:
   `validator-2→8546`). The orchestrator and CLIs connect to the first reachable
   one and fail over on transport errors.
   ```bash
-  gcloud compute start-iap-tunnel validator-1 8545 --local-host-port=localhost:8545 --zone=us-central1-a
-  gcloud compute start-iap-tunnel validator-2 8545 --local-host-port=localhost:8546 --zone=us-central1-b
-  gcloud compute start-iap-tunnel validator-3 8545 --local-host-port=localhost:8547 --zone=us-central1-c
+  gcloud compute start-iap-tunnel validator-1 8545 --local-host-port=127.0.0.1:8545 --zone=us-central1-a
+  gcloud compute start-iap-tunnel validator-2 8545 --local-host-port=127.0.0.1:8546 --zone=us-central1-b
+  gcloud compute start-iap-tunnel validator-3 8545 --local-host-port=127.0.0.1:8547 --zone=us-central1-c
   ```
 - **Idempotent + resumable orchestrator** — progress (last scanned block +
   completed request ids) is persisted to `orchestrator_state.json`. On restart it
