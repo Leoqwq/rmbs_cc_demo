@@ -64,5 +64,30 @@ python -m pytest tests/ -v   # encodes the expected numbers
 For IAF=500000 / PAF=1000000 the result is ClassA=79,000,000, ClassB=15,000,000,
 ClassC=5,000,000, IAF remaining 70,833.33.
 
+## Robustness
+The **consensus/ledger layer** is the Besu QBFT network: with 4 validators it
+tolerates 1 being offline (needs 3 of 4 to keep producing blocks). The
+orchestrator adds two local hardening features so a single node/tunnel outage
+doesn't stall the compute path either:
+
+- **RPC failover** — set `RPC_URLS` to several validator tunnels (one IAP tunnel
+  per validator on distinct local ports, e.g. `validator-1→8545`,
+  `validator-2→8546`). The orchestrator and CLIs connect to the first reachable
+  one and fail over on transport errors.
+  ```bash
+  gcloud compute start-iap-tunnel validator-1 8545 --local-host-port=localhost:8545 --zone=us-central1-a
+  gcloud compute start-iap-tunnel validator-2 8545 --local-host-port=localhost:8546 --zone=us-central1-b
+  gcloud compute start-iap-tunnel validator-3 8545 --local-host-port=localhost:8547 --zone=us-central1-c
+  ```
+- **Idempotent + resumable orchestrator** — progress (last scanned block +
+  completed request ids) is persisted to `orchestrator_state.json`. On restart it
+  resumes from the last block and re-checks each request's on-chain `getResult()`
+  before acting, so requests are never computed/posted twice and a request that
+  fails (TEE down, reverted tx) is retried on the next poll rather than lost.
+
+Not yet redundant: the **TEE itself is a single node**. Surviving a TEE outage
+needs multiple TEEs + quorum (whitepaper's compute-enclave pool) — a separate,
+cloud-cost-incurring step.
+
 ## Cost
 Stop the chain and `tee-node` when done (`gcloud compute instances stop ...`).

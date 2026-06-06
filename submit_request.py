@@ -10,9 +10,10 @@ import os
 from dotenv import load_dotenv
 from web3 import Web3
 
+from chain import connect_web3, get_rpc_urls
+
 load_dotenv()
 
-RPC_URL = os.environ["RPC_URL"]
 CHAIN_ID = int(os.environ["CHAIN_ID"])
 CONTRACT_ADDRESS = Web3.to_checksum_address(os.environ["CONTRACT_ADDRESS"])
 PK = os.environ["DEPLOYER_PRIVATE_KEY"]
@@ -30,8 +31,7 @@ def main():
     p.add_argument("--period", type=int, default=1)
     args = p.parse_args()
 
-    w3 = Web3(Web3.HTTPProvider(RPC_URL))
-    assert w3.is_connected(), f"Cannot connect to {RPC_URL}"
+    w3 = connect_web3(get_rpc_urls())
     acct = w3.eth.account.from_key(PK)
     with open(ABI_PATH) as f:
         abi = json.load(f)["abi"]
