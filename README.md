@@ -39,12 +39,17 @@ Open separate terminals.
    gcloud compute ssh tee-node --zone=us-central1-a --tunnel-through-iap \
      -- -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 8000:127.0.0.1:8000
    ```
-2. **TEE service** — run it on `tee-node` under `tmux` (so it survives SSH/tunnel
-   drops). Note the printed TEE address and put it in `.env` as `TEE_ADDRESS`:
+2. **TEE service** — SSH into `tee-node`, then run it under `tmux` (so it survives
+   SSH/tunnel drops). Note the printed TEE address and put it in `.env` as
+   `TEE_ADDRESS`:
    ```bash
+   # from your local machine — open a shell on the confidential VM
+   gcloud compute ssh tee-node --zone=us-central1-a --tunnel-through-iap
+   # --- now inside tee-node ---
    tmux new -s tee
    cd ~/rmbs_cc_demo && source .venv/bin/activate && python -m tee.tee_service
-   # Ctrl-b then d to detach; service keeps running
+   # Ctrl-b then d to detach; service keeps running. (First-time node setup:
+   # sudo apt-get install -y python3-venv python3-pip tmux; see RUNBOOK.md stage 1.)
    ```
 3. **Deploy the contract** (uses `TEE_ADDRESS`, `DEPLOYER_PRIVATE_KEY`). Put the
    printed address in `.env` as `CONTRACT_ADDRESS`:
