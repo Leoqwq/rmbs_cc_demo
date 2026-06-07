@@ -1,19 +1,49 @@
-# RMBS Confidential Compute — 端到端测试 Runbook（实测版）
+# RMBS Confidential Compute — Oracle DON 端到端测试 Runbook（实测版）
 
-本文是**踩过坑、可复现**的完整链上端到端流程，命令均经过一次成功的实链联调验证。
-对应 spec `docs/superpowers/specs/2026-06-03-rmbs-cc-waterfall-demo-design.md`
-和实现 plan `docs/superpowers/plans/2026-06-05-rmbs-cc-waterfall-demo.md` 的 Task 8。
+本文是**踩过坑、可复现**的完整链上端到端流程，命令均经过实链联调验证。
+对应 spec `docs/superpowers/specs/2026-06-03-rmbs-cc-waterfall-demo-design.md`、
+plan `docs/superpowers/plans/2026-06-07-oracle-don-attestation.md`。
 
-**组件在哪儿跑**：TEE 服务跑在 `tee-node`（GCP 机密 VM）；合约部署、编排器、提交/读取
-CLI 都在**本地 Mac**，经 IAP 隧道连到云上。
+**组件在哪儿跑**：TEE 服务跑在 `tee-node`（GCP 机密 VM）；合约部署、oracle agent、提交/读取
+CLI 都在**本地 Mac**，经 IAP 隧道连到云上。oracle agent 与 validator 节点**无绑定关系**——
+它们是本地进程，只是用各自的 key。
 
-> 前置（本地）：`pip install -r requirements.txt`、`forge install foundry-rs/forge-std`、
-> `forge build` 已完成；`.env` 由 `.env.example` 复制而来待填。开多个终端，标注 T1/T2/…；
-> 带 `start-iap-tunnel` / `ssh -L` 的终端是长驻的，别关。
+## 步骤分类图例
+
+- **【一次性】** 只需做一次；结果落在磁盘/链上，跨节点 stop/start 持久,**后续复现可跳过**。
+- **【每次】** 每次测试都要做（实例、隧道、TEE 服务、agent 都不持久）。
+- **【按需】** 仅当代码改了 / 要重新部署合约 / oracle 账户没 gas 时才做。
+
+> **关键认识**：Besu 链状态(已部署的合约、oracle 账户余额、TEE 的签名 key)都**持久在磁盘上**。
+> 所以做过一次完整部署后，**日常复现只需「启实例 → 起 TEE → 开隧道 → 起 agent → submit/read」**，
+> 不必重新部署合约、不必重新充值、不必重新生成密钥。
 
 ---
 
-## 阶段 0 — 启动云端资源（T1）
+## ⚡ 复现速查（已完成首次部署后，每次测试照这个走）
+
+```bash
+# 1) 启实例（每次）
+gcloud compute instances start bootnode-a validator-1 validator-4 --zone=us-central1-a
+gcloud compute instances start bootnode-b validator-2 --zone=us-central1-b
+gcloud compute instances start validator-3 --zone=us-central1-c   # 必须 ≥3 个 validator 在线
+gcloud compute instances start tee-node --zone=us-central1-a
+
+# 2) 起 TEE（每次）：SSH 进 tee-node，tmux 里 python -m tee.tee_service（见阶段 3）
+# 3) 开 2 条隧道（每次）：链 8545 + TEE 8000，全用 127.0.0.1（见阶段 4）
+# 4) 起 4 个 oracle agent（每次，每个终端）
+set -a; source .env; set +a ; source .venv/bin/activate
+ORACLE_ID=1 ORACLE_KEY=0x<key1> python oracle_agent.py   # 另 3 个终端同理 key2/3/4
+# 5) 提交 + 读
+python submit_request.py --iaf 500000 --paf 1000000
+python read_result.py <返回的 id>     # 期望 finalized=True  attestations=3/3
+# 6) 结束停机（每次）见阶段 8
+```
+若 `read_result` 一直空 / agent 报 `Known transaction` → 见末尾「故障排查」。
+
+---
+
+## 阶段 0 —【每次】启动云端资源 + 确认出块
 
 ```bash
 export ZA=us-central1-a ZB=us-central1-b ZC=us-central1-c
@@ -22,8 +52,7 @@ gcloud compute instances start bootnode-b validator-2 --zone=$ZB
 gcloud compute instances start validator-3 --zone=$ZC
 gcloud compute instances start tee-node --zone=$ZA
 ```
-
-等约 1–2 分钟（节点 systemd 自启 Besu），确认在出块：
+**QBFT 4 个 validator 需至少 3 个在线才出块。** 等约 1–2 分钟，确认在出块：
 ```bash
 gcloud compute ssh validator-1 --zone=$ZA --tunnel-through-iap \
   --command='curl -s -X POST -H "Content-Type: application/json" \
@@ -34,9 +63,9 @@ gcloud compute ssh validator-1 --zone=$ZA --tunnel-through-iap \
 
 ---
 
-## 阶段 1 — tee-node 一次性环境准备（仅首次）
+## 阶段 1 —【一次性】tee-node 环境准备
 
-Ubuntu 自带 python 不含 venv/pip，先装（tee-node 有 Cloud NAT 可联网）：
+Ubuntu 自带 python 不含 venv/pip：
 ```bash
 gcloud compute ssh tee-node --zone=$ZA --tunnel-through-iap
 #   --- 在 tee-node 内 ---
@@ -44,223 +73,159 @@ sudo apt-get update
 sudo apt-get install -y python3-venv python3-pip tmux
 ```
 
-把 TEE 代码拷上去（**别把本地 tee/kd 旧密钥带上**；没有就忽略）：
+---
+
+## 阶段 2 —【一次性 / 按需(代码更新时)】把 TEE 代码传到 tee-node
+
+**首次（全量）：**
 ```bash
 # 本地执行
 gcloud compute scp --tunnel-through-iap --zone=$ZA --recurse \
   /Users/leo/Desktop/rmbs_cc_demo/tee \
+  /Users/leo/Desktop/rmbs_cc_demo/abi_digest.py \
   /Users/leo/Desktop/rmbs_cc_demo/requirements.txt \
   tee-node:~/rmbs_cc_demo/
+# 节点内建 venv 装依赖
+gcloud compute ssh tee-node --zone=$ZA --tunnel-through-iap
+cd ~/rmbs_cc_demo && python3 -m venv .venv && source .venv/bin/activate
+pip install --upgrade pip && pip install -r requirements.txt
 ```
-在 tee-node 内建 venv 装依赖：
+> `abi_digest.py` 在仓库**根目录**（TEE 服务 `import abi_digest`），要放到 `~/rmbs_cc_demo/abi_digest.py`。
+
+**【按需】只改了 TEE 相关代码时**（避免覆盖 `tee/kd` 里的签名 key）：
 ```bash
-cd ~/rmbs_cc_demo
-python3 -m venv .venv && source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
+gcloud compute scp --tunnel-through-iap --zone=$ZA \
+  abi_digest.py tee-node:~/rmbs_cc_demo/
+gcloud compute scp --tunnel-through-iap --zone=$ZA \
+  tee/tee_service.py tee/signing.py tee/encryption_seam.py tee-node:~/rmbs_cc_demo/tee/
 ```
 
 ---
 
-## 阶段 2 — 在 tee-node 用 tmux 常驻 TEE 服务
+## 阶段 3 —【每次】在 tee-node 用 tmux 启动 TEE，记下地址
 
-**用 tmux**，这样 SSH/隧道掉线也不会杀掉 TEE：
 ```bash
-# 在 tee-node 内
+gcloud compute ssh tee-node --zone=us-central1-a --tunnel-through-iap
+#   --- 节点内 ---
 tmux new -s tee
 cd ~/rmbs_cc_demo && source .venv/bin/activate && python -m tee.tee_service
-#   按 Ctrl-b 再按 d 脱离；服务继续后台跑
+#   记下 "TEE signing address: 0x..."；Ctrl-b d 脱离
+curl -s http://127.0.0.1:8000/tee_address     # 自测：{"success":true,"address":"0x..."}
 ```
-启动日志里记下：
-```
-TEE signing address: 0x....    ← 部署合约要用
-```
-节点内自测（确认监听 IPv4）：
-```bash
-curl -s http://127.0.0.1:8000/tee_address     # → {"success":true,"address":"0x..."}
-```
-> 想让地址可复现：启动前 `export TEE_PRIVATE_KEY=0x...`；否则在 `tee/kd/` 自动生成并持久化
-> （重启会复用同一把，地址不变）。
+> TEE 签名 key 持久在 `tee/kd/`，节点重启后地址不变 → 与已部署合约里的 `teeAddress` 一致，
+> 不必重部署。**首次部署**时把这个地址填进 `.env` 的 `TEE_ADDRESS`。
 
 ---
 
-## 阶段 3 — 建隧道（关键：全部用 `127.0.0.1`，不要 `localhost`）
+## 阶段 4 —【每次】建隧道（关键：全用 `127.0.0.1`，不要 `localhost`）
 
-为什么不用 `localhost`：① Besu 的 RPC `host-allowlist` 只放行 `127.0.0.1`，用 `localhost`
-会 `403 Host not authorized`；② TEE 转发里 `localhost` 在节点侧可能解析成 IPv6 `::1`，而
-uvicorn 只听 IPv4 `0.0.0.0`，导致 `connect failed: Connection refused`。
+不用 `localhost` 的原因：① Besu RPC `host-allowlist` 只放行 `127.0.0.1`（否则 `403`）；
+② TEE 转发里 `localhost` 在节点侧可能解析成 IPv6 `::1`，而 uvicorn 只听 IPv4 → `Connection refused`。
 
-**T2 — 链 RPC 隧道：**
 ```bash
+# T-链：RPC 隧道
 gcloud compute start-iap-tunnel validator-1 8545 \
   --local-host-port=127.0.0.1:8545 --zone=us-central1-a
-```
-
-**T3 — TEE 端口转发（IPv4 目标 + SSH 保活）：**
-```bash
+# T-TEE：端口转发（IPv4 目标 + 保活）
 gcloud compute ssh tee-node --zone=us-central1-a --tunnel-through-iap \
   -- -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 8000:127.0.0.1:8000
 ```
-
-本地验证两条都通：
-```bash
-curl -s http://127.0.0.1:8000/tee_address     # TEE 通
-# 链稍后由部署/编排器验证
-```
-
-> 若 IAP 隧道频繁掉线（websocket 重连失败、Broken pipe），见末尾「路 B」：把编排器也搬进 VPC，
-> 彻底不依赖长隧道。
+> 4 个本地 oracle agent **共用这 1 条链隧道 + 1 条 TEE 隧道**即可。验证：
+> `curl -s http://127.0.0.1:8000/tee_address` 返回地址即通。
 
 ---
 
-## 阶段 4 — 填 `.env` 并部署合约（T5，本地仓库根）
+## 阶段 5 —【一次性 / 按需】生成 oracle 密钥、部署 DON 合约、充值
 
-编辑 `.env`（注意全用 `127.0.0.1`）：
+> 这一整段在**首次部署**时做一次。链状态持久，之后复现可全跳过——除非：改了合约要重新部署、
+> 或换了 oracle 账户/账户 gas 用尽要重新充值。
+
+**5.1【一次性】生成 n=4 个 oracle 密钥**（生成后存好私钥，长期复用）：
 ```bash
-RPC_URLS=http://127.0.0.1:8545          # 最小路径先填一条；做 failover 再加 8546/8547
+cast wallet new      # 跑 4 次，记录 4 个 address 和 private key
+```
+填入 `.env`：
+```bash
+RPC_URLS=http://127.0.0.1:8545          # 做 failover 再加 8546/8547
 RPC_URL=http://127.0.0.1:8545
 CHAIN_ID=20260416
 DEPLOYER_PRIVATE_KEY=0x<创世账户 0xcbA2…dc69 的私钥>
 TEE_URL=http://127.0.0.1:8000
-TEE_ADDRESS=0x<阶段 2 打印的 TEE 地址>
+TEE_ADDRESS=0x<阶段 3 打印的地址>
+ORACLE_ADDRESSES=0xOracle1,0xOracle2,0xOracle3,0xOracle4
+THRESHOLD=3
 CONTRACT_ADDRESS=                        # 部署后回填
 ```
 
-部署（**不要 `--gas-price 0`**——这条链的 validator 没设 `--min-gas-price=0`，零 gas 交易会被
-`-32009` 拒绝；forge legacy 会自动用节点 gas price）：
+**5.2【按需】部署 DON 合约**（不要 `--gas-price 0`）：
 ```bash
-set -a; source .env; set +a              # export，让 forge 读到
+set -a; source .env; set +a
+forge build      # 确保 out/ 是最新 ABI
 forge script script/Deploy.s.sol:Deploy --rpc-url "$RPC_URL" --broadcast --legacy
-```
-输出里记下 `ConfidentialCompute deployed at: 0x...`，回填到 `.env` 的 `CONTRACT_ADDRESS`。
-
-**两项校验：**
-```bash
-set -a; source .env; set +a
-cast code "$CONTRACT_ADDRESS" --rpc-url "$RPC_URL"               # 返回一长串字节码 = 真上链了
-cast call "$CONTRACT_ADDRESS" "teeAddress()(address)" --rpc-url "$RPC_URL"   # 应 == TEE 地址
-```
-> 若 `teeAddress` 与 TEE 实际地址不一致（比如换了 TEE key），不用重部署，用 admin 改：
-> ```bash
-> cast send "$CONTRACT_ADDRESS" "setTEEAddress(address)" <TEE地址> \
->   --rpc-url "$RPC_URL" --private-key "$DEPLOYER_PRIVATE_KEY" --legacy
-> ```
-
----
-
-## 阶段 4b — 生成 oracle 密钥并部署 DON 合约
-
-**部署前**：生成 n=4 个 oracle 密钥对（每个 validator 主机一个），将四个地址写入 `.env`：
-```bash
-# 用 cast wallet new 或任意密钥生成工具生成 4 个密钥对；记录地址和私钥
-# 填入 .env：
-ORACLE_ADDRESSES=0xOracle1,0xOracle2,0xOracle3,0xOracle4
-THRESHOLD=3
-```
-
-部署（参见阶段 4 的命令；新合约构造器接受 oracle 地址集合和 threshold）：
-```bash
-set -a; source .env; set +a
-forge script script/Deploy.s.sol:Deploy --rpc-url "$RPC_URL" --broadcast --legacy
-# 记下打印的合约地址，回填 CONTRACT_ADDRESS
-```
-
-**校验：**
-```bash
-set -a; source .env; set +a
+# 记下 "ConfidentialCompute deployed at: 0x..."，回填 .env 的 CONTRACT_ADDRESS
+set -a; source .env; set +a      # 回填后重新 source
 cast call "$CONTRACT_ADDRESS" "oracleCount()(uint256)" --rpc-url "$RPC_URL"   # → 4
-cast call "$CONTRACT_ADDRESS" "threshold()(uint256)" --rpc-url "$RPC_URL"     # → 3
+cast call "$CONTRACT_ADDRESS" "threshold()(uint256)"  --rpc-url "$RPC_URL"    # → 3
 cast call "$CONTRACT_ADDRESS" "teeAddress()(address)" --rpc-url "$RPC_URL"    # == TEE 地址
 ```
 
-**给 oracle 账户充值 gas**（一次性，从 deployer 转账）：
+**5.3【一次性 / 按需】给 oracle 账户充 gas**（⚠️ 漏了这步 → attest 交易卡 mempool、`read_result` 空）：
 ```bash
 source .venv/bin/activate
 python fund_oracles.py
+# 校验任一 oracle 有余额：
+cast balance 0xOracle1 --rpc-url "$RPC_URL"
 ```
+> 余额在链上持久。只要 oracle 账户不变且 gas 没用尽，**复现时不必再充**。
 
 ---
 
-## 阶段 5 — 跑通 DON 主流程
+## 阶段 6 —【每次】启动 4 个 oracle agent
 
-**T6–T9 — 启动 N 个 oracle agent**（改过 `.env` 后务必重新 `source`；每个 agent 用自己的
-`ORACLE_ID` 和 `ORACLE_KEY`，理想情况下在对应 validator 主机的 VPC 内运行）：
+各开一个终端，`ORACLE_ID`/`ORACLE_KEY` 内联传（每个不同）：
 ```bash
-# T6 — oracle agent 1（本地或 validator-1 上）
 set -a; source .env; set +a
 source .venv/bin/activate
 ORACLE_ID=1 ORACLE_KEY=0x<key1> python oracle_agent.py
-
-# T7 — oracle agent 2（另一个终端/主机）
-ORACLE_ID=2 ORACLE_KEY=0x<key2> python oracle_agent.py
-
-# T8 — oracle agent 3，T9 — oracle agent 4（同理）
+# 另外三个终端：ORACLE_ID=2/3/4 ORACLE_KEY=0x<key2/3/4>
 ```
-每个 agent 启动后打印：
-```
-Oracle agent '1' up. addr=0x...  contract=0x...
-TEE=http://127.0.0.1:8000 (expect 0x...)  RPCs=['http://127.0.0.1:8545']
-Resuming from block 0, 0 requests already attested.
-```
-
-**T10 — 提交请求 + 读结果：**
-```bash
-source .venv/bin/activate
-python submit_request.py --iaf 500000 --paf 1000000      # → Request submitted: id=1
-```
-各 oracle agent 应依次打印（顺序不定）：
-```
->>> [oracle 0x...] ComputeRequested id=1 IAF=500000 PAF=1000000
-  attested ok tx=0x...
-```
-≥3 个 agent 完成后合约触发 `ResultPosted`（DON quorum 达成）。然后：
-```bash
-python read_result.py 1
-```
-预期 `finalized=True  attestations=3/3 (DON quorum)`，`resultJson` 解析出：
-```
-ClassA 79,000,000 / ClassB 15,000,000 / ClassC 5,000,000
-cash_remaining: IAF 70,833.33 / PAF 0.0 / RESERVE 0.0
-```
-
-> **鲁棒性说明**：m=3 n=4 DON 可容忍 1 个 oracle 掉线，与 QBFT 容忍 1 个 validator
-> 掉线对称。每个 oracle agent 的进度持久化在 `oracle_state_<id>.json`，重启后幂等续跑。
+每个应打印 `Oracle agent 'k' up. addr=0x... contract=0x... Resuming from block ...`。
 
 ---
 
-## 阶段 6 — 验收（链上结果 == 本地引擎）
+## 阶段 7 —【每次】提交请求 + 读结果
 
 ```bash
-python -m pytest tests/ -q       # 17 passed —— 测试里写死的就是上面这组数
+python submit_request.py --iaf 500000 --paf 1000000      # → Request submitted: id=N
 ```
-链上 `getResult(1)` 的各档余额与本地 `WaterfallRunner.run_period` 同输入逐字节一致 →
-**证明 confidential compute 正确计算了 waterfall 并把签名校验过的结果写回了链**（spec §8 闭环）。
+各 agent 依次打印（顺序不定）`>>> [oracle 0x...] ComputeRequested id=N ... attested ok tx=0x...`；
+≥3 个完成后合约触发 `ResultPosted`。然后：
+```bash
+python read_result.py N
+# 期望：finalized=True  attestations=3/3 (DON quorum)
+#       ClassA 79,000,000 / B 15,000,000 / C 5,000,000 / IAF 70,833.33
+```
+**验收**：`python -m pytest tests/ -q`（17 passed）——链上数值与本地引擎一致 = spec §8 闭环。
 
 ---
 
-## 阶段 7 —（可选）鲁棒性演练
+## 阶段 8 —【可选】鲁棒性演练
 
-**A. DON 容错（m=3, n=4）** — 停掉任意一个 oracle agent（Ctrl-C），再 `submit_request`
-一次 → 剩余 3 个 agent 仍可完成 quorum，`read_result` 显示 `finalized=True  attestations=3/3`。
-（与 QBFT 容忍 1 个 validator 掉线对称。）
+**A. DON 容错（测的是 oracle，不是 validator）** — Ctrl-C **一个 oracle agent**，再 `submit_request`
+一次 → 剩 3 个仍达成 `attestations=3/3 finalized=True`（m=3/n=4 容忍 1 个 oracle 掉线）。
 
-**B. RPC failover** — 先多开两条隧道，`.env` 改
-`RPC_URLS=http://127.0.0.1:8545,http://127.0.0.1:8546,http://127.0.0.1:8547`，重启各 agent：
-```bash
-gcloud compute start-iap-tunnel validator-2 8545 --local-host-port=127.0.0.1:8546 --zone=us-central1-b
-gcloud compute start-iap-tunnel validator-3 8545 --local-host-port=127.0.0.1:8547 --zone=us-central1-c
-```
-运行中断掉 T2（validator-1 隧道），再 `submit_request` 一次 → agent 应自动切换到可用 RPC
-并照常处理完。（QBFT 容忍 1 个 validator 掉线。）
+**B. 链容错** — 关掉**一个 validator**（保持 ≥3 在线），链仍出块、流程照常（QBFT 容忍 1 个）。
+> 注意 A 和 B 是**不同的层**：agent 与 validator 没有绑定。
 
-**C. 幂等 + 断点续跑** — 停掉所有 agent，再 `submit_request`（此刻没人处理），然后重启
-各 `oracle_agent.py`。每个 agent 从持久化区块续扫，补处理挂起请求；已 attest 的请求查
-`hasAttested` / `getResult` 跳过、不重复上链。可查看 `oracle_state_<id>.json` 的
-`last_scanned_block` / `attested_ids`。
+**C. RPC failover** — 多开 8546/8547 两条隧道、`.env` 的 `RPC_URLS` 列三个，断掉链隧道之一 →
+agent 自动切换可用 RPC。
+
+**D. 幂等 + 断点续跑** — 停掉 agent，`submit_request`，再重启 agent → 从持久化区块续扫补处理，
+已 attest 的查 `hasAttested`/`getResult` 跳过、不重复上链。
 
 ---
 
-## 阶段 8 — 收尾控成本
+## 阶段 9 —【每次】收尾控成本
 
 ```bash
 gcloud compute instances stop bootnode-a validator-1 validator-4 tee-node --zone=us-central1-a
@@ -270,22 +235,38 @@ gcloud compute instances stop validator-3 --zone=us-central1-c
 
 ---
 
-## 易踩的坑（实测总结）
+## 故障排查
 
-1. **顺序**：先起 TEE → 拿地址填 `.env` → 再部署（合约把 TEE 地址固化进去）。
-2. **全用 `127.0.0.1`**：`localhost` 会触发 Besu 403 / IPv6 连接被拒。
-3. **不要 `--gas-price 0`**：链非零 gas；forge 用 `--legacy`，脚本用 `w3.eth.gas_price`。
-4. **改完 `.env` 必须 `set -a; source .env; set +a`**：否则旧值（含空字符串）残留在 shell，
-   `load_dotenv()` 默认不覆盖，会读到旧值。
-5. **TEE 用 tmux/nohup 常驻**：别在 SSH 前台跑，否则隧道一断 TEE 就被杀。
-6. **TEE 隧道目标用 `-L 8000:127.0.0.1:8000`**，并加 `ServerAliveInterval` 保活。
-7. **隧道终端别关**：每条 `start-iap-tunnel` / `ssh -L` 各占一个终端。
+- **`read_result` 一直空 / agent 刷 `-32000 Known transaction`** → **oracle 账户没 gas**。
+  attest 交易进了 mempool 但无法被打包，agent 反复重发同一笔。修复：`python fund_oracles.py`，
+  用 `cast balance <oracle>` 确认有余额；链恢复后 agent 会自动补完、自愈，无需重新 submit。
+- **交易一直 pending / 链不出块** → 在线 validator < 3。QBFT 4 节点需 3 个出块；确认 1/2/4
+  都 `RUNNING`：`gcloud compute instances describe <v> --zone=<z> --format="value(status)"`。
+- **关了 validator，oracle agent 却还在跑** → 正常：agent 是本地进程，与 validator 无绑定。
+  测 DON 容错请 Ctrl-C **agent**（阶段 8A）。
+- **部署/交易 `-32009 Gas price below minimum`** → 别用 `--gas-price 0`；forge 用 `--legacy`，
+  脚本已用 `w3.eth.gas_price`。
+- **`403 Host not authorized` / TEE `Connection refused`** → 用 `127.0.0.1` 而非 `localhost`；
+  TEE 转发用 `-L 8000:127.0.0.1:8000`。
+- **改了 `.env` 不生效** → `set -a; source .env; set +a`（`load_dotenv` 默认不覆盖已 export 的值）。
+- **TEE 隧道一断 TEE 就没了** → TEE 必须在 `tmux` 里跑，别用 SSH 前台。
+
+---
+
+## 易踩坑速记
+
+1. 先起 TEE → 拿地址填 `.env` → 再部署。
+2. 全用 `127.0.0.1`。
+3. 不要 `--gas-price 0`。
+4. 改 `.env` 后 `set -a; source .env; set +a`。
+5. TEE 用 `tmux` 常驻；隧道加 `ServerAliveInterval`。
+6. **新 oracle 账户记得 `fund_oracles.py` 充 gas。**
+7. 每条隧道各占一个终端，别关。
 
 ## 路 B — 隧道太不稳时：把 oracle agent 搬进 VPC
 
 若本地 IAP 隧道频繁掉线，让 oracle agent 在对应 validator 主机上跑：连链走 validator 内网 IP
 `http://10.20.1.21:8545`（Host 落在 `10.20.0.0/16` 白名单内），连 TEE 走 `http://127.0.0.1:8000`，
-两跳都在 VPC 内、无需长隧道。需把 `oracle_agent.py abi_digest.py chain.py`、
-合约 ABI（`out/ConfidentialCompute.sol/ConfidentialCompute.json`）和 `.env`（含该
-oracle 的 `ORACLE_ID`/`ORACLE_KEY`）一并拷到节点；人只在提交/读取时开短隧道（或直接
-在节点上敲 `submit_request.py` / `read_result.py`）。
+两跳都在 VPC 内、无需长隧道。需把 `oracle_agent.py abi_digest.py chain.py`、合约 ABI
+（`out/ConfidentialCompute.sol/ConfidentialCompute.json`）和 `.env`（含该 oracle 的
+`ORACLE_ID`/`ORACLE_KEY`）拷到节点；人只在提交/读取时开短隧道（或直接在节点上跑 CLI）。
