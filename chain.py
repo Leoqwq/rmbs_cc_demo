@@ -6,7 +6,7 @@ list of those tunnel endpoints so a single validator (or its tunnel) going
 offline is transparent. ``RPC_URL`` (singular) is still honored as a fallback.
 
 - ``connect_web3`` is for one-shot CLIs: connect to the first reachable endpoint.
-- ``ResilientChain`` is for the long-running orchestrator: it keeps a contract
+- ``ResilientChain`` is for the long-running oracle agents: it keeps a contract
   bound to the active endpoint and, on a transport error, fails over to the next
   endpoint and retries. Contract reverts are NOT retried (they re-raise).
 """

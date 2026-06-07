@@ -54,7 +54,7 @@ def main():
     logs = contract.events.ComputeRequested().process_receipt(receipt)
     request_id = logs[0]["args"]["id"]
     print(f"Request submitted: id={request_id} (deal={args.deal}, IAF={args.iaf}, PAF={args.paf})")
-    print(f"Watch the orchestrator; then read the result with:")
+    print(f"Watch the oracle DON agents; then read the result with:")
     print(f"  python read_result.py {request_id}")
 
 
