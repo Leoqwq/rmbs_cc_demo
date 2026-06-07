@@ -1,17 +1,18 @@
 """TEE signing: canonical serialization, keccak hashing, ECDSA over the hash.
 
-The TEE signs keccak256(canonical_json(result)) with the Ethereum personal-sign
-prefix (encode_defunct). The contract recovers the same way and checks it equals
-the configured TEE address. Key handling mirrors ccc-demo: load from a file or
-generate-and-persist on first run.
+The TEE signs keccak256(abi.encode(id, dealId, period, iaf, paf, resultHash)) with
+the Ethereum personal-sign prefix (EIP-191), binding the result to the exact request.
+The contract recovers the same way and checks it equals the configured TEE address.
+Key handling mirrors ccc-demo: load from a file or generate-and-persist on first run.
 """
 import json
 import os
 from typing import Any, Dict
 
 from eth_account import Account
-from eth_account.messages import encode_defunct
 from web3 import Web3
+
+import abi_digest as ad
 
 TEE_KEY_FILE = os.path.join(os.path.dirname(__file__), "kd", "tee_signing_key.json")
 
@@ -26,10 +27,12 @@ def result_hash(result: Dict[str, Any]) -> bytes:
     return Web3.keccak(text=canonical_json(result))
 
 
-def sign_result(hash_bytes: bytes, private_key: str) -> bytes:
-    """Personal-sign the 32-byte hash; returns 65-byte signature."""
-    signed = Account.sign_message(encode_defunct(primitive=hash_bytes), private_key)
-    return bytes(signed.signature)
+def sign_request_bound(id: int, deal_id: str, period: int, iaf: int, paf: int,
+                       result_hash_bytes: bytes, private_key: str) -> bytes:
+    """Sign keccak256(abi.encode(id, dealId, period, iaf, paf, resultHash)) —
+    binds the enclave result to the exact request and inputs."""
+    digest = ad.tee_digest(id, deal_id, period, iaf, paf, result_hash_bytes)
+    return ad.sign_digest(digest, private_key)
 
 
 def get_signer(private_key: str) -> str:
