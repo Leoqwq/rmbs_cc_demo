@@ -1,4 +1,4 @@
-"""Read a stored compute result from the contract: python read_result.py <id>."""
+"""Read a stored compute result: python read_result.py <id>."""
 import json
 import os
 import sys
@@ -20,9 +20,10 @@ contract = w3.eth.contract(
 )
 
 request_id = int(sys.argv[1])
-posted, result_hash, result_json = contract.functions.getResult(request_id).call()
-print(f"posted={posted}")
+finalized, attestation_count, result_hash, result_json = contract.functions.getResult(request_id).call()
+threshold = contract.functions.threshold().call()
+print(f"finalized={finalized}  attestations={attestation_count}/{threshold} (DON quorum)")
 print(f"resultHash=0x{result_hash.hex()}")
 print(f"resultJson={result_json}")
-if posted:
+if finalized:
     print("parsed:", json.dumps(json.loads(result_json), indent=2))

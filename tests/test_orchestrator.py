@@ -6,7 +6,7 @@ end-to-end run (plan Task 8); here we cover the pure, chain-free logic.
 import pytest
 
 import chain
-import orchestrator
+import oracle_agent
 
 
 # --- #2: RPC endpoint selection / failover ---------------------------------
@@ -60,14 +60,14 @@ def test_connect_web3_raises_when_none_reachable(monkeypatch):
 # --- #3: orchestrator state persistence ------------------------------------
 
 def test_load_state_defaults_when_missing(tmp_path):
-    last_block, completed = orchestrator.load_state(str(tmp_path / "nope.json"))
+    last_block, attested = oracle_agent.load_state(str(tmp_path / "nope.json"))
     assert last_block == 0
-    assert completed == set()
+    assert attested == set()
 
 
 def test_save_then_load_state_roundtrip(tmp_path):
     path = str(tmp_path / "state.json")
-    orchestrator.save_state(42, {3, 1, 2}, path)
-    last_block, completed = orchestrator.load_state(path)
+    oracle_agent.save_state(42, {3, 1, 2}, path)
+    last_block, attested = oracle_agent.load_state(path)
     assert last_block == 42
-    assert completed == {1, 2, 3}
+    assert attested == {1, 2, 3}
