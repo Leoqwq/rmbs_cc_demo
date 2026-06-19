@@ -43,6 +43,6 @@ def test_decrypt_inputs_raises_below_threshold():
     s = setup_encrypted_request(PAYLOAD, shares=3, threshold=2)
     state = load_public_state(s["state_path"])
     enclave_sk = SecretKey.from_bytes(b64d(s["enclave_secret_b64"]))
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError, match="cfrags verified"):
         decrypt_inputs(s["capsule_b64"], s["ciphertext_b64"], s["cfrags_b64"][:1],
                        enclave_sk, state)

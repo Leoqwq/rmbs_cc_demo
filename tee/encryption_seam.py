@@ -31,6 +31,15 @@ def decrypt_inputs(capsule_b64: str, ciphertext_b64: str, cfrags_b64: list[str],
         except Exception:
             continue  # drop a corrupt/lying node's fragment
 
+    # Defense-in-depth: the oracle already gathered >= threshold, but the TEE does
+    # not trust it. A short count here turns a wrong-key state (e.g. a stale
+    # umbral_state.json) into a clear error instead of an opaque umbral failure.
+    if len(verified) < state["threshold"]:
+        raise ValueError(
+            f"only {len(verified)}/{state['threshold']} cfrags verified — "
+            "possible wrong-key state or too few honest decryption nodes"
+        )
+
     plaintext = decrypt_reencrypted(
         receiving_sk=enclave_sk,
         delegating_pk=state["master_pk"],
