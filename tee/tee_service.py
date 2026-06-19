@@ -1,16 +1,20 @@
 """TEE compute enclave (FastAPI).
 
-POST /compute  -> decrypt inputs (identity for now), run the waterfall, return the
-                  result + keccak hash + a TEE signature BOUND to the request
-                  (id + inputs + resultHash). Oracle nodes verify this signature.
-GET  /tee_address -> the enclave's signing address.
+GET  /enclave_pubkey -> the enclave's Umbral receiving public key (base64).
+POST /compute        -> decrypt the re-encrypted inputs inside the enclave, run the
+                        waterfall, return result + keccak hash + a TEE signature BOUND
+                        to the request (id + ciphertextHash + resultHash).
+GET  /tee_address    -> the enclave's signing address.
 """
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+import abi_digest as ad
 from tee.compute import compute_waterfall
+from tee.enclave_keys import load_or_create_enclave_key
 from tee.encryption_seam import decrypt_inputs
 from tee.signing import load_or_create_key, result_hash, sign_request_bound
+from umbral_io import b64d, b64e, load_public_state
 
 app = FastAPI(title="RMBS Confidential Compute TEE")
 
@@ -21,10 +25,9 @@ print("Set this as TEE_ADDRESS in .env (and pass it to deploy) before deploying.
 
 class ComputeRequest(BaseModel):
     id: int
-    dealId: str
-    period: int
-    iaf: int
-    paf: int
+    capsule: str
+    ciphertext: str
+    cfrags: list[str]
 
 
 @app.get("/tee_address")
@@ -32,13 +35,23 @@ def tee_address():
     return {"success": True, "address": TEE_ADDRESS}
 
 
+@app.get("/enclave_pubkey")
+def enclave_pubkey():
+    _, pk = load_or_create_enclave_key()
+    return {"success": True, "pubkey": b64e(bytes(pk))}
+
+
 @app.post("/compute")
 def compute(req: ComputeRequest):
     try:
-        inp = decrypt_inputs({"iaf": req.iaf, "paf": req.paf, "period": req.period})
-        result = compute_waterfall(iaf=float(inp["iaf"]), paf=float(inp["paf"]), period=inp["period"])
+        enclave_sk, _ = load_or_create_enclave_key()
+        state = load_public_state()
+        inp = decrypt_inputs(req.capsule, req.ciphertext, req.cfrags, enclave_sk, state)
+        result = compute_waterfall(
+            iaf=float(inp["iaf"]), paf=float(inp["paf"]), period=int(inp["period"]))
         h = result_hash(result)
-        tee_sig = sign_request_bound(req.id, req.dealId, req.period, req.iaf, req.paf, h, PRIVATE_KEY)
+        ch = ad.ciphertext_hash(b64d(req.capsule), b64d(req.ciphertext))
+        tee_sig = sign_request_bound(req.id, ch, h, PRIVATE_KEY)
         return {
             "success": True,
             "result": result,
