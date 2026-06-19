@@ -1,8 +1,9 @@
 """Shared digest + signature helpers for the oracle DON.
 
 Digests are computed with eth_abi so they match the contract's abi.encode:
-- tee_digest:    keccak256(abi.encode(id, dealId, period, iaf, paf, resultHash))
-                 -> binds the enclave result to the exact request + inputs.
+- tee_digest:    keccak256(abi.encode(id, ciphertextHash, resultHash))
+                 where ciphertextHash = keccak256(capsule || ciphertext)
+                 -> binds the enclave result to the exact submitted ciphertext.
 - oracle_digest: keccak256(abi.encode(id, resultHash))
                  -> what each oracle signs to attest the (verified) result.
 
@@ -15,11 +16,17 @@ from eth_account.messages import encode_defunct
 from web3 import Web3
 
 
-def tee_digest(id: int, deal_id: str, period: int, iaf: int, paf: int, result_hash: bytes) -> bytes:
+def ciphertext_hash(capsule: bytes, ciphertext: bytes) -> bytes:
+    """keccak256(capsule || ciphertext) — matches Solidity
+    keccak256(abi.encodePacked(capsule, ciphertext)) (raw byte concat)."""
+    return Web3.keccak(bytes(capsule) + bytes(ciphertext))
+
+
+def tee_digest(id: int, ciphertext_hash_bytes: bytes, result_hash: bytes) -> bytes:
     return Web3.keccak(
         encode(
-            ["uint256", "string", "uint256", "uint256", "uint256", "bytes32"],
-            [int(id), str(deal_id), int(period), int(iaf), int(paf), bytes(result_hash)],
+            ["uint256", "bytes32", "bytes32"],
+            [int(id), bytes(ciphertext_hash_bytes), bytes(result_hash)],
         )
     )
 

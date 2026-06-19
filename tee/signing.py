@@ -1,8 +1,9 @@
 """TEE signing: canonical serialization, keccak hashing, ECDSA over the hash.
 
-The TEE signs keccak256(abi.encode(id, dealId, period, iaf, paf, resultHash)) with
-the Ethereum personal-sign prefix (EIP-191), binding the result to the exact request.
-The contract recovers the same way and checks it equals the configured TEE address.
+The TEE signs keccak256(abi.encode(id, ciphertextHash, resultHash)) with
+the Ethereum personal-sign prefix (EIP-191), binding the result to the exact
+submitted ciphertext (inputs stay encrypted). The contract recovers the same
+way and checks it equals the configured TEE address.
 Key handling mirrors ccc-demo: load from a file or generate-and-persist on first run.
 """
 import json
@@ -27,11 +28,11 @@ def result_hash(result: Dict[str, Any]) -> bytes:
     return Web3.keccak(text=canonical_json(result))
 
 
-def sign_request_bound(id: int, deal_id: str, period: int, iaf: int, paf: int,
+def sign_request_bound(id: int, ciphertext_hash_bytes: bytes,
                        result_hash_bytes: bytes, private_key: str) -> bytes:
-    """Sign keccak256(abi.encode(id, dealId, period, iaf, paf, resultHash)) —
-    binds the enclave result to the exact request and inputs."""
-    digest = ad.tee_digest(id, deal_id, period, iaf, paf, result_hash_bytes)
+    """Sign keccak256(abi.encode(id, ciphertextHash, resultHash)) — binds the
+    enclave result to the exact submitted ciphertext (inputs stay encrypted)."""
+    digest = ad.tee_digest(id, ciphertext_hash_bytes, result_hash_bytes)
     return ad.sign_digest(digest, private_key)
 
 

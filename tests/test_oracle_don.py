@@ -7,11 +7,14 @@ import abi_digest as ad
 def test_tee_digest_matches_manual_abi_encode():
     from eth_abi import encode
     rh = Web3.keccak(text='{"x":1}')
-    expected = Web3.keccak(
-        encode(["uint256", "string", "uint256", "uint256", "uint256", "bytes32"],
-               [1, "TEST_SEQ_2024", 1, 500000, 1000000, rh])
-    )
-    assert ad.tee_digest(1, "TEST_SEQ_2024", 1, 500000, 1000000, rh) == expected
+    ch = Web3.keccak(b"\xaa\xbb\xcc\xdd")
+    expected = Web3.keccak(encode(["uint256", "bytes32", "bytes32"], [1, ch, rh]))
+    assert ad.tee_digest(1, ch, rh) == expected
+
+
+def test_ciphertext_hash_is_keccak_of_raw_concat():
+    # Must match Solidity keccak256(abi.encodePacked(capsule, ciphertext)).
+    assert ad.ciphertext_hash(b"\xaa\xbb", b"\xcc\xdd") == Web3.keccak(b"\xaa\xbb\xcc\xdd")
 
 
 def test_oracle_digest_matches_manual_abi_encode():
