@@ -13,7 +13,7 @@ from umbral import encrypt
 from web3 import Web3
 
 from chain import connect_web3, get_rpc_urls
-from umbral_io import b64e, load_public_state
+from umbral_io import load_public_state
 
 load_dotenv()
 
