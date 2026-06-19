@@ -54,14 +54,9 @@ Decide how the pinned key reaches the contract (admin set vs DON-quorum set).
 
 ## 2. Encryption + decryption DON (the "confidential" in confidential compute)
 
-**Status:** deferred. Seam already left in place: `tee/encryption_seam.py`
-(`decrypt_inputs`, identity today) and the oracle agent's input-handling boundary.
-
-Restore the white paper's privacy path: users encrypt inputs under a threshold
-public key; a **decryption DON** (vault) holds the key in threshold form and
-re-encrypts inputs to the assigned enclave's public key; the enclave decrypts
-inside the TEE. This is what makes inputs private from everyone including the
-operators. Slots into the existing seams without re-plumbing the request flow.
+**Status:** DONE (2026-06-18). Implemented per
+`docs/superpowers/specs/2026-06-16-encryption-decryption-don-design.md` and
+`docs/superpowers/plans/2026-06-17-encryption-decryption-don.md`.
 
 ---
 
@@ -90,3 +85,37 @@ instead of one tx per oracle. Only changes the aggregation/submission layer.
 **Status:** deferred. The demo uses the simple `basic_sequential_deal`. Exercise
 `rmbs_platform` deals with triggers / Net WAC cap / multi-period / loss allocation
 to validate confidential compute over the engine's full feature set.
+
+---
+
+## 6. Split the oracle DON and decryption DON into two networks
+
+**Status:** deferred. We reuse the oracle operators as decryption nodes (one operator
+runs both `oracle_agent.py` and `decryption_node.py`). The white paper keeps them
+separate so no single node can both decrypt inputs and attest results. Because they are
+already two processes, splitting is mostly a deployment change (run the decryption nodes
+on a distinct operator set).
+
+---
+
+## 7. Threshold DKG instead of trusted-dealer keygen
+
+**Status:** deferred. `keygen.py` is a trusted dealer that transiently holds the full
+master secret. Replace with a distributed key-generation ceremony among the nodes
+(white-paper step 0, "decryption nodes jointly generate").
+
+---
+
+## 8. Per-request forward-secure enclave keys
+
+**Status:** deferred. The enclave uses a static receiving key (kfrags pre-generated for
+it). The white paper's per-request fresh enclave key (3.1 forward-secure encryption)
+limits a compromised enclave to only the requests assigned while compromised.
+
+---
+
+## 9. Off-chain ciphertext storage for large inputs
+
+**Status:** deferred. `capsule + ciphertext` are stored on-chain as `bytes`; fine for the
+small RMBS inputs but gas-costly for large future inputs. Store the ciphertext off-chain
+and keep only `ciphertextHash` on-chain (the binding digest already carries it).

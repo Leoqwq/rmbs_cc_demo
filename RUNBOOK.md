@@ -31,13 +31,15 @@ gcloud compute instances start tee-node --zone=us-central1-a
 
 # 2) 起 TEE（每次）：SSH 进 tee-node，tmux 里 python -m tee.tee_service（见阶段 3）
 # 3) 开 2 条隧道（每次）：链 8545 + TEE 8000，全用 127.0.0.1（见阶段 4）
-# 4) 起 4 个 oracle agent（每次，每个终端）
+# 3b) 【一次性】密钥设置：python keygen.py --shares 3 --threshold 2（见阶段 3b）
+# 4) 起解密节点（每次）：python run_decryption_nodes.py（见阶段 5b）
+# 5) 起 4 个 oracle agent（每次，每个终端）
 set -a; source .env; set +a ; source .venv/bin/activate
 ORACLE_ID=1 ORACLE_KEY=0x<key1> python oracle_agent.py   # 另 3 个终端同理 key2/3/4
-# 5) 提交 + 读
+# 6) 提交 + 读
 python submit_request.py --iaf 500000 --paf 1000000
 python read_result.py <返回的 id>     # 期望 finalized=True  attestations=3/3
-# 6) 结束停机（每次）见阶段 8
+# 7) 结束停机（每次）见阶段 8
 ```
 若 `read_result` 一直空 / agent 报 `Known transaction` → 见末尾「故障排查」。
 
@@ -111,9 +113,26 @@ tmux new -s tee
 cd ~/rmbs_cc_demo && source .venv/bin/activate && python -m tee.tee_service
 #   记下 "TEE signing address: 0x..."；Ctrl-b d 脱离
 curl -s http://127.0.0.1:8000/tee_address     # 自测：{"success":true,"address":"0x..."}
+curl -s http://127.0.0.1:8000/enclave_pubkey  # 自测：{"enclave_pubkey":"..."}
 ```
 > TEE 签名 key 持久在 `tee/kd/`，节点重启后地址不变 → 与已部署合约里的 `teeAddress` 一致，
 > 不必重部署。**首次部署**时把这个地址填进 `.env` 的 `TEE_ADDRESS`。
+
+---
+
+## 阶段 3b —【一次性】密钥设置（Key setup）
+
+> 仅首次做。`kd/umbral_state.json` 持久在本地磁盘，之后复现可跳过。
+> 例外：若 `tee/kd/enclave_enc_key.json` 被删除或重新生成，需重新执行本阶段（kfrag 绑定了 enclave 公钥）。
+
+确认隧道已通（见阶段 4），`GET /enclave_pubkey` 能响应后执行：
+```bash
+source .venv/bin/activate
+python keygen.py --shares 3 --threshold 2
+# --shares = 节点数（与 oracle 数一致），--threshold = 法定人数 m
+# 成功后写入 kd/umbral_state.json（master pubkey + 每个节点的 kfrag）
+```
+> `--shares` 和 `--threshold` 须与 `.env` 的 `THRESHOLD` 以及实际启动的解密节点数匹配。
 
 ---
 
@@ -180,6 +199,22 @@ cast balance 0xOracle1 --rpc-url "$RPC_URL"
 
 ---
 
+## 阶段 5b —【每次】启动解密节点（Decryption DON）
+
+```bash
+source .venv/bin/activate
+python run_decryption_nodes.py
+# 每个 kfrag 对应一个进程，依次绑定端口 5000, 5001, 5002, ...
+# 每个节点提供 POST /reencrypt，不发链上交易，无需充值
+```
+确认 `.env` 中已设置（端口数须与 `--shares` 一致）：
+```bash
+DECRYPTION_NODE_URLS=http://127.0.0.1:5000,http://127.0.0.1:5001,http://127.0.0.1:5002
+```
+验证：`curl -s http://127.0.0.1:5000/health` 返回 `{"status":"ok"}` 即通。
+
+---
+
 ## 阶段 6 —【每次】启动 4 个 oracle agent
 
 各开一个终端，`ORACLE_ID`/`ORACLE_KEY` 内联传（每个不同）：
@@ -198,6 +233,9 @@ ORACLE_ID=1 ORACLE_KEY=0x<key1> python oracle_agent.py
 ```bash
 python submit_request.py --iaf 500000 --paf 1000000      # → Request submitted: id=N
 ```
+> `submit_request.py` 在客户端加密输入（pyUmbral）后调用 `submitRequest(capsule, ciphertext)`；
+> 明文 iaf/paf **不上链**。
+
 各 agent 依次打印（顺序不定）`>>> [oracle 0x...] ComputeRequested id=N ... attested ok tx=0x...`；
 ≥3 个完成后合约触发 `ResultPosted`。然后：
 ```bash
@@ -205,7 +243,7 @@ python read_result.py N
 # 期望：finalized=True  attestations=3/3 (DON quorum)
 #       ClassA 79,000,000 / B 15,000,000 / C 5,000,000 / IAF 70,833.33
 ```
-**验收**：`python -m pytest tests/ -q`（17 passed）——链上数值与本地引擎一致 = spec §8 闭环。
+**验收**：`python -m pytest tests/ -q`（29 passed）——链上数值与本地引擎一致 = spec §8 闭环。
 
 ---
 
@@ -250,6 +288,13 @@ gcloud compute instances stop validator-3 --zone=us-central1-c
   TEE 转发用 `-L 8000:127.0.0.1:8000`。
 - **改了 `.env` 不生效** → `set -a; source .env; set +a`（`load_dotenv` 默认不覆盖已 export 的值）。
 - **TEE 隧道一断 TEE 就没了** → TEE 必须在 `tmux` 里跑，别用 SSH 前台。
+- **`FileNotFoundError: kd/umbral_state.json`** → 还没跑过 `keygen.py`，或 state 文件被删。
+  先确认 TEE 在跑、隧道已通，再执行阶段 3b。
+- **oracle log 显示 "only k/m valid cfrags"** → 在线的解密节点少于 `threshold` 个（或某节点设了
+  `CORRUPTED=1`）。确认 `run_decryption_nodes.py` 正在运行、端口正常，补齐节点再重试。
+- **"bad TEE sig" / TEE 签名验证失败（加密功能上线后）** → 最常见原因：enclave 收到 key 重新生成后
+  keygen 未重跑（kfrag 与新 enclave pubkey 不匹配），或 `UMBRAL_STATE` / `.env` 指向了旧的
+  state 文件。删除 `kd/umbral_state.json` 并重新执行阶段 3b。
 
 ---
 
@@ -260,8 +305,9 @@ gcloud compute instances stop validator-3 --zone=us-central1-c
 3. 不要 `--gas-price 0`。
 4. 改 `.env` 后 `set -a; source .env; set +a`。
 5. TEE 用 `tmux` 常驻；隧道加 `ServerAliveInterval`。
-6. **新 oracle 账户记得 `fund_oracles.py` 充 gas。**
+6. **新 oracle 账户记得 `fund_oracles.py` 充 gas。**（解密节点无需充值）
 7. 每条隧道各占一个终端，别关。
+8. **首次运行或 enclave key 重新生成后，记得执行 `keygen.py`（阶段 3b）再起解密节点。**
 
 ## 路 B — 隧道太不稳时：把 oracle agent 搬进 VPC
 
