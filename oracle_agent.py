@@ -18,12 +18,18 @@ import requests
 from dotenv import load_dotenv
 
 import abi_digest as ad
+import umbral_io as uio
 from chain import ResilientChain, TRANSPORT_ERRORS, get_rpc_urls
 
 POLL_INTERVAL = 3
 ABI_PATH = os.path.join(
     os.path.dirname(__file__), "out", "ConfidentialCompute.sol", "ConfidentialCompute.json"
 )
+
+
+def ad_b64(value) -> str:
+    """ComputeRequested event bytes (HexBytes/bytes) -> base64 string for HTTP/JSON."""
+    return uio.b64e(bytes(value))
 
 
 def load_abi():
@@ -51,7 +57,7 @@ def save_state(last_block: int, attested_ids, path: str):
 
 
 def handle_request(chain, tee_url, tee_address, oracle_pk, oracle_address,
-                   chain_id, request_id, args, attested_ids) -> bool:
+                   chain_id, request_id, args, attested_ids, node_urls, state) -> bool:
     if request_id in attested_ids:
         return True
     finalized, _, _, _ = chain.run(lambda w3, c: c.functions.getResult(request_id).call())
@@ -63,12 +69,29 @@ def handle_request(chain, tee_url, tee_address, oracle_pk, oracle_address,
         attested_ids.add(request_id)
         return True
 
-    print(f"\n>>> [oracle {oracle_address}] ComputeRequested id={request_id} "
-          f"IAF={args['iaf']} PAF={args['paf']}")
+    capsule_b64 = ad_b64(args["capsule"])
+    ciphertext_b64 = ad_b64(args["ciphertext"])
+    print(f"\n>>> [oracle {oracle_address}] ComputeRequested id={request_id} (encrypted)")
+
+    # Steps 3-4: collect re-encryption fragments from the decryption DON.
+    raw_cfrags = []
+    for url in node_urls:
+        try:
+            r = requests.post(f"{url}/reencrypt", json={"capsule": capsule_b64}, timeout=10)
+            r.raise_for_status()
+            raw_cfrags.append(r.json()["cfrag"])
+        except Exception as e:  # noqa: BLE001 - a down/bad node must not stop the quorum
+            print(f"  decryption node {url} failed ({e}); skipping")
+    cfrags = uio.verify_cfrags(capsule_b64, raw_cfrags, state)
+    if len(cfrags) < state["threshold"]:
+        print(f"  only {len(cfrags)}/{state['threshold']} valid cfrags; retry next loop")
+        return False
+
+    # Step 5-6: forward to the enclave, which decrypts + computes + signs.
     try:
         resp = requests.post(f"{tee_url}/compute", json={
-            "id": request_id, "dealId": args["dealId"], "period": args["period"],
-            "iaf": args["iaf"], "paf": args["paf"],
+            "id": request_id, "capsule": capsule_b64,
+            "ciphertext": ciphertext_b64, "cfrags": cfrags,
         }, timeout=30)
         resp.raise_for_status()
         body = resp.json()
@@ -82,11 +105,12 @@ def handle_request(chain, tee_url, tee_address, oracle_pk, oracle_address,
     result_hash = bytes.fromhex(body["resultHash"])
     tee_sig = bytes.fromhex(body["teeSig"][2:])
 
-    # Verify the enclave attestation is bound to THIS request before signing.
-    digest = ad.tee_digest(request_id, args["dealId"], args["period"], args["iaf"], args["paf"], result_hash)
+    # Step 7: verify the enclave attestation is bound to THIS ciphertext before signing.
+    ciphertext_hash = ad.ciphertext_hash(uio.b64d(capsule_b64), uio.b64d(ciphertext_b64))
+    digest = ad.tee_digest(request_id, ciphertext_hash, result_hash)
     recovered = ad.recover_digest(digest, tee_sig)
     if recovered.lower() != tee_address.lower():
-        print(f"  BAD TEE signature (got {recovered}, want {tee_address}); refusing to attest")
+        print(f"  BAD TEE signature (got {recovered}, want {tee_address}); refusing")
         return False
 
     result_json = json.dumps(body["result"], sort_keys=True, separators=(",", ":"))
@@ -109,7 +133,6 @@ def handle_request(chain, tee_url, tee_address, oracle_pk, oracle_address,
         print(f"  attested ok tx={tx_hash.hex()}")
         attested_ids.add(request_id)
         return True
-    # Someone may have finalized between our checks; treat as done if so.
     finalized, _, _, _ = chain.run(lambda w3, c: c.functions.getResult(request_id).call())
     if finalized or chain.run(lambda w3, c: c.functions.hasAttested(request_id, oracle_address).call()):
         attested_ids.add(request_id)
@@ -126,6 +149,8 @@ def main():
     contract_address = os.environ["CONTRACT_ADDRESS"]
     tee_url = os.environ["TEE_URL"].rstrip("/")
     tee_address = os.environ["TEE_ADDRESS"]
+    node_urls = [u.strip().rstrip("/") for u in os.environ["DECRYPTION_NODE_URLS"].split(",") if u.strip()]
+    state = uio.load_public_state()
 
     chain = ResilientChain(get_rpc_urls(), contract_address, load_abi())
     oracle_address = chain.w3.eth.account.from_key(oracle_pk).address
@@ -134,6 +159,7 @@ def main():
     last_block, attested_ids = load_state(path)
     print(f"Oracle agent '{oracle_id}' up. addr={oracle_address} contract={chain.contract_address}")
     print(f"TEE={tee_url} (expect {tee_address})  RPCs={chain.rpc_urls}")
+    print(f"Decryption nodes: {node_urls} (threshold {state['threshold']})")
     print(f"Resuming from block {last_block}, {len(attested_ids)} requests already attested.")
 
     while True:
@@ -145,7 +171,8 @@ def main():
                 all_done = True
                 for ev in events:
                     if not handle_request(chain, tee_url, tee_address, oracle_pk, oracle_address,
-                                          chain_id, ev["args"]["id"], ev["args"], attested_ids):
+                                          chain_id, ev["args"]["id"], ev["args"], attested_ids,
+                                          node_urls, state):
                         all_done = False
                         break
                 if all_done:
