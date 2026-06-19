@@ -13,7 +13,8 @@ contract ConfidentialComputeTest is Test {
     uint256[4] oraclePks = [uint256(0xAA01), 0xAA02, 0xAA03, 0xAA04];
     address[] oracles;
 
-    string constant DEAL = "TEST_SEQ_2024";
+    bytes constant CAP = hex"aabb";
+    bytes constant CT = hex"ccdd";
     string constant RJSON = '{"period":1}';
 
     function setUp() public {
@@ -25,7 +26,7 @@ contract ConfidentialComputeTest is Test {
     }
 
     function _newRequest() internal returns (uint256 id) {
-        id = cc.submitRequest(DEAL, 1, 500000, 1000000);
+        id = cc.submitRequest(CAP, CT);
     }
 
     function _eth(bytes32 h) internal pure returns (bytes32) {
@@ -33,7 +34,8 @@ contract ConfidentialComputeTest is Test {
     }
 
     function _teeSig(uint256 id, bytes32 rh) internal view returns (bytes memory) {
-        bytes32 d = keccak256(abi.encode(id, DEAL, uint256(1), uint256(500000), uint256(1000000), rh));
+        bytes32 ch = keccak256(abi.encodePacked(CAP, CT));
+        bytes32 d = keccak256(abi.encode(id, ch, rh));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(teePk, _eth(d));
         return abi.encodePacked(r, s, v);
     }
@@ -85,10 +87,16 @@ contract ConfidentialComputeTest is Test {
         uint256 id = _newRequest();
         bytes32 rh = keccak256(bytes(RJSON));
         // teeSig from a non-TEE key
-        bytes32 d = keccak256(abi.encode(id, DEAL, uint256(1), uint256(500000), uint256(1000000), rh));
+        bytes32 ch = keccak256(abi.encodePacked(CAP, CT));
+        bytes32 d = keccak256(abi.encode(id, ch, rh));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(0xBAD, _eth(d));
         vm.expectRevert("bad TEE sig");
         cc.attest(id, rh, RJSON, abi.encodePacked(r, s, v), _oracleSig(oraclePks[0], id, rh));
+    }
+
+    function test_CiphertextHashMatchesPythonVector() public pure {
+        // Python: Web3.keccak(b"\xaa\xbb\xcc\xdd"); both sides hash the raw concat.
+        assertEq(keccak256(abi.encodePacked(CAP, CT)), keccak256(hex"aabbccdd"));
     }
 
     function test_RejectsResultHashMismatchOnSecond() public {

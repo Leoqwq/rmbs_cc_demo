@@ -8,10 +8,8 @@ pragma solidity ^0.8.20;
 ///         m-of-n oracle DON quorum have been verified on-chain (DON-attested).
 contract ConfidentialCompute {
     struct Request {
-        string dealId;
-        uint256 period;
-        uint256 iaf;
-        uint256 paf;
+        bytes capsule;
+        bytes ciphertext;
         address requester;
         bool resultStored;        // TEE-attested result recorded
         bool finalized;           // DON quorum reached
@@ -30,7 +28,7 @@ contract ConfidentialCompute {
     mapping(uint256 => mapping(address => bool)) public hasAttested;
 
     event ComputeRequested(
-        uint256 indexed id, string dealId, uint256 period, uint256 iaf, uint256 paf, address requester
+        uint256 indexed id, bytes capsule, bytes ciphertext, address requester
     );
     event Attested(uint256 indexed id, address indexed oracle, uint256 count);
     event ResultPosted(uint256 indexed id, bytes32 resultHash, string resultJson); // DON-attested
@@ -60,18 +58,16 @@ contract ConfidentialCompute {
         return oracles.length;
     }
 
-    function submitRequest(string calldata dealId, uint256 period, uint256 iaf, uint256 paf)
+    function submitRequest(bytes calldata capsule, bytes calldata ciphertext)
         external
         returns (uint256 id)
     {
         id = ++requestCount;
         Request storage r = requests[id];
-        r.dealId = dealId;
-        r.period = period;
-        r.iaf = iaf;
-        r.paf = paf;
+        r.capsule = capsule;
+        r.ciphertext = ciphertext;
         r.requester = msg.sender;
-        emit ComputeRequested(id, dealId, period, iaf, paf, msg.sender);
+        emit ComputeRequested(id, capsule, ciphertext, msg.sender);
     }
 
     /// @notice One oracle's attestation of a TEE result. The first valid call for an
@@ -94,9 +90,8 @@ contract ConfidentialCompute {
 
         if (!r.resultStored) {
             require(keccak256(bytes(resultJson)) == resultHash, "hash mismatch");
-            bytes32 teeDigest = keccak256(
-                abi.encode(id, r.dealId, r.period, r.iaf, r.paf, resultHash)
-            );
+            bytes32 ciphertextHash = keccak256(abi.encodePacked(r.capsule, r.ciphertext));
+            bytes32 teeDigest = keccak256(abi.encode(id, ciphertextHash, resultHash));
             require(_recover(_ethSigned(teeDigest), teeSig) == teeAddress, "bad TEE sig");
             r.resultHash = resultHash;
             r.resultJson = resultJson;
