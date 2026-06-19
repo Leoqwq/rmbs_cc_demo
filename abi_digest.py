@@ -18,7 +18,10 @@ from web3 import Web3
 
 def ciphertext_hash(capsule: bytes, ciphertext: bytes) -> bytes:
     """keccak256(capsule || ciphertext) — matches Solidity
-    keccak256(abi.encodePacked(capsule, ciphertext)) (raw byte concat)."""
+    keccak256(abi.encodePacked(capsule, ciphertext)) (raw byte concat).
+
+    Raw concat is unambiguous because the Umbral capsule is fixed-length (98 bytes),
+    so the capsule/ciphertext boundary cannot shift."""
     return Web3.keccak(bytes(capsule) + bytes(ciphertext))
 
 

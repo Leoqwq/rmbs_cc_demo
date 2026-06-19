@@ -90,6 +90,9 @@ contract ConfidentialCompute {
 
         if (!r.resultStored) {
             require(keccak256(bytes(resultJson)) == resultHash, "hash mismatch");
+            // encodePacked (raw concat) is unambiguous here because the Umbral capsule is
+            // fixed-length (98 bytes), so the capsule/ciphertext boundary cannot shift.
+            // Must byte-match Python keccak(capsule + ciphertext) in abi_digest.ciphertext_hash.
             bytes32 ciphertextHash = keccak256(abi.encodePacked(r.capsule, r.ciphertext));
             bytes32 teeDigest = keccak256(abi.encode(id, ciphertextHash, resultHash));
             require(_recover(_ethSigned(teeDigest), teeSig) == teeAddress, "bad TEE sig");
