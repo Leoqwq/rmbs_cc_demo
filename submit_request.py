@@ -1,4 +1,5 @@
-"""User CLI: submit one period of cashflows to the ConfidentialCompute contract.
+"""User CLI: encrypt one period of cashflows under the decryption DON's master
+public key and submit the ciphertext to the ConfidentialCompute contract.
 
 Usage:
   python submit_request.py --iaf 500000 --paf 1000000 [--deal TEST_SEQ_2024] [--period 1]
@@ -8,9 +9,11 @@ import json
 import os
 
 from dotenv import load_dotenv
+from umbral import encrypt
 from web3 import Web3
 
 from chain import connect_web3, get_rpc_urls
+from umbral_io import b64e, load_public_state
 
 load_dotenv()
 
@@ -31,17 +34,24 @@ def main():
     p.add_argument("--period", type=int, default=1)
     args = p.parse_args()
 
+    state = load_public_state()
+    payload = json.dumps(
+        {"dealId": args.deal, "period": args.period, "iaf": args.iaf, "paf": args.paf},
+        sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    capsule, ciphertext = encrypt(state["master_pk"], payload)
+
     w3 = connect_web3(get_rpc_urls())
     acct = w3.eth.account.from_key(PK)
     with open(ABI_PATH) as f:
         abi = json.load(f)["abi"]
     contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=abi)
 
-    tx = contract.functions.submitRequest(args.deal, args.period, args.iaf, args.paf).build_transaction(
+    tx = contract.functions.submitRequest(bytes(capsule), bytes(ciphertext)).build_transaction(
         {
             "from": acct.address,
             "nonce": w3.eth.get_transaction_count(acct.address),
-            "gas": 400000,
+            "gas": 600000,
             "gasPrice": w3.eth.gas_price,
             "chainId": CHAIN_ID,
         }
@@ -53,8 +63,9 @@ def main():
 
     logs = contract.events.ComputeRequested().process_receipt(receipt)
     request_id = logs[0]["args"]["id"]
-    print(f"Request submitted: id={request_id} (deal={args.deal}, IAF={args.iaf}, PAF={args.paf})")
-    print(f"Watch the oracle DON agents; then read the result with:")
+    print(f"Request submitted (encrypted): id={request_id} "
+          f"(capsule {len(bytes(capsule))}B, ciphertext {len(bytes(ciphertext))}B)")
+    print(f"Inputs are NOT on-chain in plaintext. Read the result later with:")
     print(f"  python read_result.py {request_id}")
 
 
