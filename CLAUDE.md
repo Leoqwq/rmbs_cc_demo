@@ -32,7 +32,7 @@ Python side (run from repo root, venv at `.venv`):
 source .venv/bin/activate
 python -m pytest tests/ -q                      # all Python tests (offline)
 python -m pytest tests/test_oracle_don.py -v    # one file
-python -m pytest tests/test_tee_compute.py::test_compute_endpoint_matches_pure_function_and_verifies_signature -v  # one test
+python -m pytest tests/test_tee_compute.py::test_compute_endpoint_encrypted_roundtrip_and_signature -v  # one test
 python -m tee.tee_service                        # run the TEE service (binds 0.0.0.0:8000)
 ```
 

@@ -113,7 +113,7 @@ tmux new -s tee
 cd ~/rmbs_cc_demo && source .venv/bin/activate && python -m tee.tee_service
 #   记下 "TEE signing address: 0x..."；Ctrl-b d 脱离
 curl -s http://127.0.0.1:8000/tee_address     # 自测：{"success":true,"address":"0x..."}
-curl -s http://127.0.0.1:8000/enclave_pubkey  # 自测：{"enclave_pubkey":"..."}
+curl -s http://127.0.0.1:8000/enclave_pubkey  # 自测：{"success":true,"pubkey":"..."}
 ```
 > TEE 签名 key 持久在 `tee/kd/`，节点重启后地址不变 → 与已部署合约里的 `teeAddress` 一致，
 > 不必重部署。**首次部署**时把这个地址填进 `.env` 的 `TEE_ADDRESS`。
@@ -211,7 +211,9 @@ python run_decryption_nodes.py
 ```bash
 DECRYPTION_NODE_URLS=http://127.0.0.1:5000,http://127.0.0.1:5001,http://127.0.0.1:5002
 ```
-验证：`curl -s http://127.0.0.1:5000/health` 返回 `{"status":"ok"}` 即通。
+验证：节点只暴露 `POST /reencrypt`（无 `/health`）。确认进程在线可用
+`curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5000/docs`（FastAPI 默认返回 `200`），
+或检查 `run_decryption_nodes.py` 打印的 PID。
 
 ---
 
