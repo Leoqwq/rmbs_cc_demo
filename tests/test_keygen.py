@@ -1,6 +1,3 @@
-import os
-import tempfile
-
 import pytest
 from umbral import (SecretKey, VerifiedKeyFrag, encrypt, reencrypt,
                     decrypt_reencrypted)
@@ -9,15 +6,9 @@ import umbral_io as uio
 from keygen import run_keygen
 
 
-def _state_file():
-    fd, path = tempfile.mkstemp(suffix="_state.json")
-    os.close(fd)
-    return path
-
-
-def test_run_keygen_produces_threshold_recoverable_state():
+def test_run_keygen_produces_threshold_recoverable_state(tmp_path):
     enclave_sk = SecretKey.random()
-    path = _state_file()
+    path = str(tmp_path / "state.json")
     run_keygen(enclave_sk.public_key(), shares=3, threshold=2, out_path=path)
 
     state = uio.load_public_state(path)
@@ -34,9 +25,9 @@ def test_run_keygen_produces_threshold_recoverable_state():
     assert plain == b'{"iaf":7}'
 
 
-def test_below_threshold_cannot_decrypt():
+def test_below_threshold_cannot_decrypt(tmp_path):
     enclave_sk = SecretKey.random()
-    path = _state_file()
+    path = str(tmp_path / "state.json")
     run_keygen(enclave_sk.public_key(), shares=3, threshold=2, out_path=path)
     state = uio.load_public_state(path)
     capsule, ciphertext = encrypt(state["master_pk"], b'{"iaf":7}')

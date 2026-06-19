@@ -50,6 +50,9 @@ def main():
     p.add_argument("--out", default=DEFAULT_STATE)
     a = p.parse_args()
 
+    if not (0 < a.threshold <= a.shares):
+        p.error(f"--threshold must be between 1 and --shares ({a.shares}); got {a.threshold}")
+
     resp = requests.get(f"{a.tee_url.rstrip('/')}/enclave_pubkey", timeout=10)
     resp.raise_for_status()
     enclave_pk = PublicKey.from_bytes(b64d(resp.json()["pubkey"]))
