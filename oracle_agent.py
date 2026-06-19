@@ -133,6 +133,7 @@ def handle_request(chain, tee_url, tee_address, oracle_pk, oracle_address,
         print(f"  attested ok tx={tx_hash.hex()}")
         attested_ids.add(request_id)
         return True
+    # Someone may have finalized (or recorded our attestation) between our checks; treat as done if so.
     finalized, _, _, _ = chain.run(lambda w3, c: c.functions.getResult(request_id).call())
     if finalized or chain.run(lambda w3, c: c.functions.hasAttested(request_id, oracle_address).call()):
         attested_ids.add(request_id)
