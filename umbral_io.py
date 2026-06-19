@@ -38,7 +38,10 @@ def load_public_state(path: str | None = None) -> dict:
 
 
 def load_kfrags(path: str | None = None) -> list[bytes]:
-    """Raw (base64-decoded) kfrag bytes, one per node."""
+    """Raw (base64-decoded) kfrag bytes, one per node.
+
+    Callers must deserialize with `umbral.VerifiedKeyFrag.from_verified_bytes(...)`
+    before passing a kfrag to `umbral.reencrypt`."""
     with open(_state_path(path)) as f:
         d = json.load(f)
     return [b64d(k) for k in d.get("kfrags", [])]
