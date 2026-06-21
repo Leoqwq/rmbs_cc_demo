@@ -1,23 +1,27 @@
 # rmbs_cc_demo — RMBS Confidential Compute (Waterfall) Demo
 
 Confidential-compute pipeline following the Chainlink Confidential Compute
-white-paper response path: a user submits one period of RMBS cashflows to a
-contract on the 6-node Besu/QBFT private chain; an oracle DON (N independent
-oracle agents, one per validator host) watches for the request, each fetches the
-result from the TEE enclave, verifies the enclave's request-bound attestation,
-and posts its own on-chain attestation; the contract finalizes the result once
-m-of-n oracle attestations are recorded (the DON-attested response).
+white-paper response path: a user **encrypts** one period of RMBS cashflows and
+submits the ciphertext to a contract on the 6-node Besu/QBFT private chain; a
+**decryption DON** re-encrypts the inputs to the TEE enclave; an oracle DON (N
+independent agents) gathers the re-encryption fragments, calls the TEE which
+decrypts in-enclave, runs the waterfall, and signs a request-bound attestation;
+each oracle verifies that attestation and posts its own; the contract finalizes
+once m-of-n oracle attestations are recorded. Inputs stay encrypted on-chain
+throughout.
 
-The Besu chain orders transactions (the ledger layer). The oracle DON is a
-software layer co-located on the validator hosts that provides m-of-n attested
-relay — removing the single-orchestrator trust and liveness SPOF. Encryption is
-intentionally omitted (see `tee/encryption_seam.py` for the future decryption
-DON seam) — the goal is to prove the DON attestation flow works end-to-end with
-the waterfall engine.
+The Besu chain orders transactions (the ledger layer). The oracle DON provides
+m-of-n attested relay — removing the single-orchestrator trust and liveness SPOF.
+**Encryption is implemented** (pyUmbral threshold proxy re-encryption): inputs are
+encrypted under the decryption DON's master key, re-encrypted to the enclave's
+receiving key by the decryption nodes, and decrypted only inside the TEE — the
+boundary lives in `tee/encryption_seam.py`. Remaining deliberate simplifications
+are tracked in `docs/FUTURE_WORK.md`.
 
-See `docs/superpowers/specs/2026-06-03-rmbs-cc-waterfall-demo-design.md` for the
-design, `private_chain/TEE.md` (in the RMBS vault) for the TEE VM, and
-**`RUNBOOK.md` for the full, tested step-by-step end-to-end procedure** (start
+See `docs/superpowers/specs/2026-06-16-encryption-decryption-don-design.md` for the
+encryption / decryption-DON design (and `…/2026-06-03-rmbs-cc-waterfall-demo-design.md`
+for the base waterfall demo), `private_chain/TEE.md` (in the RMBS vault) for the TEE VM,
+and **`RUNBOOK.md` for the full, tested step-by-step end-to-end procedure** (start
 here if you're actually running the demo).
 
 ## Prerequisites
@@ -31,7 +35,7 @@ here if you're actually running the demo).
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # then fill in DEPLOYER_PRIVATE_KEY, CONTRACT_ADDRESS, TEE_ADDRESS
+cp .env.example .env   # fill in DEPLOYER_PRIVATE_KEY, CONTRACT_ADDRESS, TEE_ADDRESS, DECRYPTION_NODE_URLS
 forge install foundry-rs/forge-std
 forge build
 ```
@@ -60,13 +64,23 @@ Open separate terminals.
    # Ctrl-b then d to detach; service keeps running. (First-time node setup:
    # sudo apt-get install -y python3-venv python3-pip tmux; see RUNBOOK.md stage 1.)
    ```
-3. **Generate oracle keys** (one per validator host, default n=4 m=3):
+3. **Key setup** (one-time) — generate the threshold re-encryption keys, then copy
+   the public state to the TEE node (the enclave reads it to verify cfrags and
+   decrypt; skipping the copy makes `/compute` fail with `No such file …umbral_state.json`):
+   ```bash
+   python keygen.py --shares 3 --threshold 2   # writes kd/umbral_state.json
+   gcloud compute scp --tunnel-through-iap --zone=us-central1-a \
+     kd/umbral_state.json tee-node:~/rmbs_cc_demo/kd/umbral_state.json
+   ```
+   > `--threshold` is the umbral re-encryption quorum (m of `--shares` decryption
+   > nodes); it is independent of the oracle `THRESHOLD` below.
+4. **Generate oracle keys** (one per validator host, default n=4 m=3):
    ```bash
    # generate four keys with cast wallet new (or any keygen tool)
    # put the four 0x addresses in .env as ORACLE_ADDRESSES (comma-separated)
    # put THRESHOLD=3 in .env
    ```
-4. **Deploy the contract** (uses `TEE_ADDRESS`, `ORACLE_ADDRESSES`, `THRESHOLD`,
+5. **Deploy the contract** (uses `TEE_ADDRESS`, `ORACLE_ADDRESSES`, `THRESHOLD`,
    `DEPLOYER_PRIVATE_KEY`). Put the printed address in `.env` as `CONTRACT_ADDRESS`:
    ```bash
    set -a; source .env; set +a     # export so forge sees the vars
@@ -75,14 +89,20 @@ Open separate terminals.
    > The chain is not actually gas-free (validators didn't set `--min-gas-price=0`),
    > so do NOT pass `--gas-price 0`; forge legacy uses the node's price. The Python
    > scripts likewise use `w3.eth.gas_price`.
-5. **Fund oracle accounts** (one-time gas top-up from the deployer):
+6. **Fund oracle accounts** (one-time gas top-up from the deployer):
    ```bash
    python fund_oracles.py
    ```
-6. **Oracle DON agents** — start one instance per oracle key (ideally one per
-   validator host, in the VPC). Each agent watches `ComputeRequested`, calls the
-   TEE, verifies the request-bound TEE attestation, and posts `attest()` from its
-   own account. Set `ORACLE_ID` and `ORACLE_KEY` differently for each instance:
+7. **Decryption DON nodes** — one process per kfrag, each serving `/reencrypt` (no
+   chain txs, no funding). Set `DECRYPTION_NODE_URLS` in `.env` to match the ports:
+   ```bash
+   BASE_PORT=5005 python run_decryption_nodes.py   # 5005.. (avoids macOS AirPlay on 5000)
+   ```
+8. **Oracle DON agents** — start one instance per oracle key (ideally one per
+   validator host, in the VPC). Each agent watches `ComputeRequested`, collects
+   ≥m re-encryption fragments from the decryption nodes, calls the TEE, verifies
+   the request-bound TEE attestation, and posts `attest()` from its own account.
+   Set `ORACLE_ID` and `ORACLE_KEY` differently for each instance:
    ```bash
    # agent 1
    ORACLE_ID=1 ORACLE_KEY=0x<key1> python oracle_agent.py
@@ -92,9 +112,11 @@ Open separate terminals.
    ```
    The contract finalizes once `THRESHOLD` distinct oracle attestations are
    recorded. With n=4 m=3, the DON tolerates 1 oracle offline (mirrors QBFT's
-   fault tolerance). Per-oracle progress is persisted to `oracle_state_<id>.json`
-   so each agent resumes idempotently after a restart.
-7. **Submit a request** and read the result:
+   fault tolerance); the extra oracles beyond m skip attesting once quorum is met.
+   Per-oracle progress is persisted to `oracle_state_<id>.json` so each agent
+   resumes idempotently after a restart.
+9. **Submit a request** and read the result (`submit_request.py` encrypts the
+   inputs client-side before submitting — plaintext never goes on-chain):
    ```bash
    python submit_request.py --iaf 500000 --paf 1000000
    python read_result.py 1
@@ -133,10 +155,12 @@ compute path:
   restart it resumes from the last block and checks `hasAttested` and `getResult`
   on-chain before acting, so attestations are never duplicated and a request that
   fails (TEE down, reverted tx) is retried on the next poll rather than lost.
-- **Encryption seam** — `tee/encryption_seam.py` is the explicit boundary where
-  the future decryption DON / re-encryption will plug in. Today it is an identity
-  function (plaintext passthrough); upgrading it does not require re-plumbing the
-  TEE service or oracle agents.
+- **Decryption DON m-of-n** — inputs are threshold-re-encrypted (pyUmbral); each
+  oracle gathers cfrags from the decryption nodes and `verify_cfrags` drops any
+  corrupt/forged fragment. With `--shares 3 --threshold 2` the re-encryption layer
+  tolerates 1 bad-or-offline decryption node; below threshold the agent stalls
+  safely and self-heals once a node returns. Decryption happens only inside the
+  TEE (boundary in `tee/encryption_seam.py`).
 
 Not yet redundant: the **TEE itself is a single node**. Surviving a TEE outage
 needs multiple TEEs + quorum (whitepaper's compute-enclave pool) — a separate,
