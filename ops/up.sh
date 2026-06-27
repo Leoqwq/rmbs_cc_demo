@@ -5,6 +5,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 load_env
 activate_venv
+[ -f "$RUN_DIR/oracles.pid" ] && die "already up — run 'make down' first (or delete .run/ if stale)"
 
 warn "Run the demo ONE PERSON AT A TIME — teammates share oracle keys; concurrent agents collide on nonces."
 
@@ -12,7 +13,7 @@ warn "Run the demo ONE PERSON AT A TIME — teammates share oracle keys; concurr
 start_bg tunnel-chain gcloud compute start-iap-tunnel validator-1 8545 \
   --local-host-port=127.0.0.1:8545 --zone="$ZONE_A"
 start_bg tunnel-tee gcloud compute ssh tee-node --zone="$ZONE_A" --tunnel-through-iap \
-  -- -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 8000:127.0.0.1:8000
+  -- -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 127.0.0.1:8000:127.0.0.1:8000
 
 # 2) Health gates.
 wait_for "chain RPC (block number)" 90 \
@@ -23,9 +24,10 @@ wait_for "TEE service" 90 curl -sf http://127.0.0.1:8000/tee_address
 
 # 3) Decryption nodes (BASE_PORT avoids macOS AirPlay on 5000).
 start_bg decnodes env BASE_PORT="${DEC_BASE_PORT:-5005}" python run_decryption_nodes.py
+[ -n "${DECRYPTION_NODE_URLS:-}" ] || die "DECRYPTION_NODE_URLS not set in .env — run 'make sync'"
 IFS=',' read -ra _NODES <<< "$DECRYPTION_NODE_URLS"
 for url in "${_NODES[@]}"; do
-  url="$(echo "$url" | xargs)"  # trim
+  url="${url//[[:space:]]/}"  # strip surrounding whitespace
   wait_for "decryption node $url" 30 curl -sf -o /dev/null "${url%/}/docs"
 done
 
