@@ -119,3 +119,12 @@ limits a compromised enclave to only the requests assigned while compromised.
 **Status:** deferred. `capsule + ciphertext` are stored on-chain as `bytes`; fine for the
 small RMBS inputs but gas-costly for large future inputs. Store the ciphertext off-chain
 and keep only `ciphertextHash` on-chain (the binding digest already carries it).
+
+---
+
+## 10. Shared genesis/deployer key in the member config bundle
+
+**Status:** deferred. `make sync` distributes `members.env` containing the shared
+`DEPLOYER_PRIVATE_KEY` (needed to pay for `submitRequest`) and the 4 `ORACLE_KEYS`;
+a real deployment would issue per-member funded accounts and use a secret manager
+instead of sharing the genesis key. Reference `docs/superpowers/specs/2026-06-26-startup-automation-design.md` §6.

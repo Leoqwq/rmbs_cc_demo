@@ -14,3 +14,5 @@ orchestrator_state.json.tmp
 oracle_state_*.json
 oracle_state_*.json.tmp
 node_modules/
+.run/
+.env.bak.*
