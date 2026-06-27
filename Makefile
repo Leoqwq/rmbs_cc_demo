@@ -35,7 +35,8 @@ demo: ## submit a request and read the result (override IAF=/PAF=)
 	@source .venv/bin/activate && set -a && source .env && set +a && \
 	  ID=$$(python submit_request.py --iaf $(IAF) --paf $(PAF) | tee /dev/stderr \
 	        | grep -oE 'id=[0-9]+' | head -1 | cut -d= -f2) && \
-	  [ -n "$$ID" ] && python read_result.py $$ID
+	  { [ -n "$$ID" ] || { echo "make demo: could not extract request id — see submit output above"; exit 1; }; } && \
+	  python read_result.py $$ID
 
 infra-up: ## owner: start shared instances + remote TEE
 	@bash ops/infra_up.sh

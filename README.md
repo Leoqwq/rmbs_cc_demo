@@ -43,8 +43,9 @@ forge build
 ## Quick start (make)
 
 Teammates sharing the existing cloud deployment:
+
+Prerequisite: a working `.venv` (see RUNBOOK stage 1 if missing) and an authenticated `gcloud`.
 ```bash
-source .venv/bin/activate     # see RUNBOOK stage 1 if .venv is missing
 make sync     # one-time per machine: pull shared config + ABI + umbral state, run doctor
 make up       # open tunnels, start decryption nodes + oracle agents (health-gated)
 make demo     # submit a request and read the finalized result
