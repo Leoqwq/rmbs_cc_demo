@@ -22,6 +22,12 @@ def check_env_keys(env, required=REQUIRED_ENV):
                  "all present" if not missing else f"missing/empty: {', '.join(missing)}")
 
 
+def check_rpc_configured(env):
+    ok = bool(env.get("RPC_URLS", "").strip() or env.get("RPC_URL", "").strip())
+    return check("RPC endpoint", ok,
+                 "RPC_URLS or RPC_URL set" if ok else "set RPC_URLS or RPC_URL in .env")
+
+
 def check_tool(name, exe):
     path = shutil.which(exe)
     return check(name, path is not None, path or f"{exe} not found on PATH")
@@ -43,11 +49,12 @@ def format_report(results):
 
 
 def run_all(env):
-    results = [check_tool("gcloud", "gcloud"), check_env_keys(env)]
+    results = [check_tool("gcloud", "gcloud"), check_env_keys(env), check_rpc_configured(env)]
     tee = env.get("TEE_URL", "").rstrip("/")
     if tee:
         results.append(check_url("TEE service", tee + "/tee_address"))
     for url in [u.strip() for u in env.get("DECRYPTION_NODE_URLS", "").split(",") if u.strip()]:
+        # /docs is GET-accessible on any live FastAPI instance; /reencrypt is POST-only
         results.append(check_url(f"decryption node {url}", url.rstrip("/") + "/docs"))
     return results
 

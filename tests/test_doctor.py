@@ -32,3 +32,17 @@ def test_format_report_counts_pass_fail():
     results = [doctor.check("a", True, "ok"), doctor.check("b", False, "nope")]
     out = doctor.format_report(results)
     assert "[OK ] a" in out and "[FAIL] b" in out and "1/2 checks passed" in out
+
+
+def test_check_url_non_200_is_fail():
+    class _Resp:
+        status_code = 503
+
+    r = doctor.check_url("TEE", "http://x/tee_address", get=lambda url, timeout: _Resp())
+    assert r["ok"] is False and "503" in r["detail"]
+
+
+def test_check_rpc_configured():
+    assert doctor.check_rpc_configured({"RPC_URLS": "http://x"})["ok"] is True
+    assert doctor.check_rpc_configured({"RPC_URL": "http://x"})["ok"] is True
+    assert doctor.check_rpc_configured({})["ok"] is False
