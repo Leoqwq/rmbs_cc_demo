@@ -4,9 +4,15 @@
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 log "starting shared instances (QBFT needs >=3 validators online to produce blocks)..."
-gcloud compute instances start $INSTANCES_A --zone="$ZONE_A"
-gcloud compute instances start $INSTANCES_B --zone="$ZONE_B"
-gcloud compute instances start $INSTANCES_C --zone="$ZONE_C"
+# Best-effort: a single zone running out of capacity (ZONE_RESOURCE_POOL_EXHAUSTED) must
+# not abort startup — QBFT tolerates one validator down (3 of 4), and the TEE step below
+# must still run. 'make up' / doctor verify actual block production afterwards.
+gcloud compute instances start $INSTANCES_A --zone="$ZONE_A" \
+  || warn "some instances in $ZONE_A failed to start (capacity?) — continuing"
+gcloud compute instances start $INSTANCES_B --zone="$ZONE_B" \
+  || warn "some instances in $ZONE_B failed to start (capacity?) — continuing"
+gcloud compute instances start $INSTANCES_C --zone="$ZONE_C" \
+  || warn "some instances in $ZONE_C failed to start (capacity?) — continuing; chain still runs if >=3 validators are up"
 
 log "ensuring the TEE service is up on tee-node (tmux session 'tee')..."
 gcloud compute ssh tee-node --zone="$ZONE_A" --tunnel-through-iap --command='
