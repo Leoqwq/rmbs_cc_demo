@@ -61,3 +61,34 @@ def test_merge_into_missing_target_creates_it(tmp_path):
     dst = str(tmp_path / ".env")  # does not exist
     ce.merge_file(src, dst)
     assert ce.parse_env(dst) == {"X": "10"}
+
+
+def test_value_containing_equals_is_preserved(tmp_path):
+    p = write(tmp_path / ".env", "")
+    ce.set_keys(p, {"DATABASE_URL": "postgres://u:pass@host/db?ssl=require"})
+    assert ce.parse_env(p)["DATABASE_URL"] == "postgres://u:pass@host/db?ssl=require"
+
+
+def test_append_preserves_comments_and_blank_lines(tmp_path):
+    p = write(tmp_path / ".env", "# top\nA=1\n\nB=2\n")
+    ce.set_keys(p, {"C": "3"})
+    text = (tmp_path / ".env").read_text()
+    assert "# top" in text and "\n\n" in text
+    assert ce.parse_env(p) == {"A": "1", "B": "2", "C": "3"}
+
+
+def test_force_replaces_only_last_of_duplicate_keys(tmp_path):
+    p = write(tmp_path / ".env", "A=1\nA=2\n")
+    ce.set_keys(p, {"A": "9"}, force=True)
+    lines = (tmp_path / ".env").read_text().splitlines()
+    assert lines == ["A=1", "A=9"]
+
+
+def test_cli_set_and_merge(tmp_path):
+    dst = str(tmp_path / ".env")
+    assert ce.main(["set", "--into", dst, "X=1"]) == 0
+    assert ce.parse_env(dst)["X"] == "1"
+    src = tmp_path / "members.env"
+    src.write_text("Y=2\n")
+    assert ce.main(["merge", "--from", str(src), "--into", dst]) == 0
+    assert ce.parse_env(dst)["Y"] == "2"

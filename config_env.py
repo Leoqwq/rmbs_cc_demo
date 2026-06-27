@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import time
 
 _LINE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
@@ -22,12 +23,15 @@ _LINE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 def _read_lines(path):
     if not os.path.exists(path):
         return []
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return f.read().splitlines()
 
 
 def parse_env(path):
-    """Return {key: value} with last-wins semantics (matches python-dotenv)."""
+    """Return {key: value} with last-wins semantics (matches python-dotenv).
+
+    Values are whitespace-stripped, so merge_file normalizes (strips) values it writes.
+    """
     result = {}
     for line in _read_lines(path):
         if line.strip().startswith("#"):
@@ -52,12 +56,17 @@ def _key_line_indexes(lines, key):
 def _atomic_write(path, lines):
     backup = None
     if os.path.exists(path):
-        backup = f"{path}.bak.{int(time.time())}"
+        backup = f"{path}.bak.{time.time_ns()}"
         shutil.copy2(path, backup)
-    tmp = f"{path}.tmp"
-    with open(tmp, "w") as f:
-        f.write("\n".join(lines) + "\n")
-    os.replace(tmp, path)
+    directory = os.path.dirname(os.path.abspath(path))
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".env.tmp.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        os.replace(tmp, path)
+    except Exception:
+        os.unlink(tmp)
+        raise
     return backup
 
 
@@ -104,6 +113,8 @@ def main(argv=None):
         updates = {}
         for pair in a.pairs:
             k, _, v = pair.partition("=")
+            if not k:
+                p.error(f"bad KEY=VALUE pair: {pair!r}")
             updates[k] = v
         res = set_keys(a.into, updates, force=a.force)
     else:
