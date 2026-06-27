@@ -71,3 +71,24 @@ def test_oracle_keys_present():
     assert pc.oracle_keys_present({"ORACLE_ADDRESSES": "0xa,0xb", "ORACLE_KEYS": "0x1,0x2"}) is True
     assert pc.oracle_keys_present({"ORACLE_ADDRESSES": "0xa,0xb", "ORACLE_KEYS": "0x1"}) is False
     assert pc.oracle_keys_present({"ORACLE_ADDRESSES": "", "ORACLE_KEYS": ""}) is False
+
+
+def test_contract_provisioned_false_on_threshold_mismatch():
+    c = _Contract(4, 2, "0xAbC0000000000000000000000000000000000001")
+    assert pc.contract_provisioned(c, 4, "0xAbC0000000000000000000000000000000000001", 3) is False
+
+
+def test_contract_provisioned_false_on_call_exception():
+    class _Broken:
+        class functions:
+            @staticmethod
+            def oracleCount():
+                class _R:
+                    def call(self_inner):
+                        raise OSError("rpc down")
+                return _R()
+    assert pc.contract_provisioned(_Broken(), 4, "0xabc", 3) is False
+
+
+def test_oracle_keys_present_false_when_keys_absent():
+    assert pc.oracle_keys_present({}) is False

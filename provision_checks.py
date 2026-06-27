@@ -38,7 +38,7 @@ def under_funded(w3, oracle_addresses, floor_wei):
 def umbral_matches_enclave(state_path, enclave_pubkey_b64):
     if not os.path.exists(state_path):
         return False
-    with open(state_path) as f:
+    with open(state_path, encoding="utf-8") as f:
         state = json.load(f)
     return state.get("enclave_public_key") == enclave_pubkey_b64
 
@@ -52,7 +52,7 @@ def oracle_keys_present(env):
 def _load_contract(env):
     abi_path = os.path.join(os.path.dirname(__file__), "out",
                             "ConfidentialCompute.sol", "ConfidentialCompute.json")
-    with open(abi_path) as f:
+    with open(abi_path, encoding="utf-8") as f:
         abi = json.load(f)["abi"]
     w3 = connect_web3(get_rpc_urls())
     contract = w3.eth.contract(
@@ -76,8 +76,12 @@ def main(argv=None):
         ok = contract_provisioned(contract, n, env["TEE_ADDRESS"], int(env["THRESHOLD"]))
         return 0 if ok else 1
     if cmd == "umbral":
-        r = requests.get(env["TEE_URL"].rstrip("/") + "/enclave_pubkey", timeout=10)
-        r.raise_for_status()
+        try:
+            r = requests.get(env["TEE_URL"].rstrip("/") + "/enclave_pubkey", timeout=10)
+            r.raise_for_status()
+        except (requests.RequestException, KeyError) as e:
+            print(f"umbral check: TEE unreachable: {e}", file=sys.stderr)
+            return 1
         return 0 if umbral_matches_enclave(uio.DEFAULT_STATE, r.json()["pubkey"]) else 1
     if cmd == "funded":
         w3 = connect_web3(get_rpc_urls())
