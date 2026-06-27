@@ -11,10 +11,12 @@ log "pulling shared config from tee-node:~/rmbs_cc_demo/share/ ..."
 gcloud compute scp --tunnel-through-iap --zone="$ZONE_A" \
   tee-node:~/rmbs_cc_demo/share/members.env "$TMP/members.env"
 gcloud compute scp --tunnel-through-iap --zone="$ZONE_A" \
-  tee-node:~/rmbs_cc_demo/share/umbral_state.json "$ROOT/kd/umbral_state.json"
+  tee-node:~/rmbs_cc_demo/share/umbral_state.json "$TMP/umbral_state.json"
 gcloud compute scp --tunnel-through-iap --zone="$ZONE_A" \
-  tee-node:~/rmbs_cc_demo/share/ConfidentialCompute.json \
-  "$ROOT/out/ConfidentialCompute.sol/ConfidentialCompute.json"
+  tee-node:~/rmbs_cc_demo/share/ConfidentialCompute.json "$TMP/ConfidentialCompute.json"
+
+cp "$TMP/umbral_state.json" "$ROOT/kd/umbral_state.json"
+cp "$TMP/ConfidentialCompute.json" "$ROOT/out/ConfidentialCompute.sol/ConfidentialCompute.json"
 
 # Shared values are the source of truth -> --force, but config_env still backs up .env first.
 python config_env.py merge --from "$TMP/members.env" --into "$ROOT/.env" --force

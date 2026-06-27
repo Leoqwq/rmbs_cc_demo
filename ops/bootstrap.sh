@@ -31,7 +31,7 @@ else
   ( cd "$ROOT" && "$FORGE" script script/Deploy.s.sol:Deploy \
       --rpc-url "$RPC_URL" --broadcast --legacy ) | tee "$RUN_DIR/deploy.log"
   ADDR="$(grep -oE 'deployed at: 0x[0-9a-fA-F]{40}' "$RUN_DIR/deploy.log" \
-          | grep -oE '0x[0-9a-fA-F]{40}' | tail -1)"
+          | grep -oE '0x[0-9a-fA-F]{40}' | tail -1 || true)"
   [ -n "$ADDR" ] || die "could not parse deployed address from .run/deploy.log"
   # We just deployed, so force-write the new address (only reached when not provisioned).
   python config_env.py set --force --into "$ROOT/.env" "CONTRACT_ADDRESS=$ADDR"

@@ -14,6 +14,7 @@ gcloud compute ssh tee-node --zone="$ZONE_A" --tunnel-through-iap \
   --command='mkdir -p ~/rmbs_cc_demo/share'
 gcloud compute scp --tunnel-through-iap --zone="$ZONE_A" \
   "$ROOT/.env" tee-node:~/rmbs_cc_demo/share/members.env
+[ -f "$ROOT/kd/umbral_state.json" ] || die "kd/umbral_state.json not found — run 'make bootstrap' first (step 3 runs keygen)"
 gcloud compute scp --tunnel-through-iap --zone="$ZONE_A" \
   "$ROOT/kd/umbral_state.json" tee-node:~/rmbs_cc_demo/share/umbral_state.json
 gcloud compute scp --tunnel-through-iap --zone="$ZONE_A" \
