@@ -5,6 +5,7 @@
 """
 import json
 import os
+import signal
 import subprocess
 
 from umbral_io import DEFAULT_STATE
@@ -28,12 +29,17 @@ def main():
         procs.append(subprocess.Popen(cmd, env=env))
 
     print("PIDs:", [p.pid for p in procs], "— Ctrl+C to stop")
+
+    def _terminate(*_):
+        for p in procs:
+            p.terminate()
+
+    signal.signal(signal.SIGTERM, _terminate)
     try:
         for p in procs:
             p.wait()
     except KeyboardInterrupt:
-        for p in procs:
-            p.terminate()
+        _terminate()
 
 
 if __name__ == "__main__":
