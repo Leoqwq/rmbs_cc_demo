@@ -40,6 +40,19 @@ forge install foundry-rs/forge-std
 forge build
 ```
 
+## Quick start (make)
+
+Teammates sharing the existing cloud deployment:
+```bash
+source .venv/bin/activate     # see RUNBOOK stage 1 if .venv is missing
+make sync     # one-time per machine: pull shared config + ABI + umbral state, run doctor
+make up       # open tunnels, start decryption nodes + oracle agents (health-gated)
+make demo     # submit a request and read the finalized result
+make down     # stop local processes (shared infra keeps running)
+```
+
+Owner (manages the shared infra): `make infra-up`, `make bootstrap` (idempotent — safe to re-run; no-op when already provisioned), `make publish-config`, `make infra-down`. Run `make help` for all targets. `RUNBOOK.md` remains the manual procedure + troubleshooting.
+
 ## Run the demo
 Open separate terminals.
 
