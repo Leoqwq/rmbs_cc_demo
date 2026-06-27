@@ -1,7 +1,7 @@
 """Launch N decryption nodes, one per kfrag in kd/umbral_state.json.
 
-  python run_decryption_nodes.py            # all kfrags, ports 5000..
-  BASE_PORT=5000 NUM_NODES=3 python run_decryption_nodes.py
+  python run_decryption_nodes.py            # all kfrags, ports 5005..
+  BASE_PORT=5005 NUM_NODES=3 python run_decryption_nodes.py
 """
 import json
 import os
@@ -10,7 +10,9 @@ import subprocess
 
 from umbral_io import DEFAULT_STATE
 
-BASE_PORT = int(os.getenv("BASE_PORT", "5000"))
+# Default to 5005 (not 5000) — macOS AirPlay occupies 5000; this matches the
+# project-wide DEC_BASE_PORT / DECRYPTION_NODE_URLS convention.
+BASE_PORT = int(os.getenv("BASE_PORT", "5005"))
 
 
 def main():
