@@ -23,7 +23,7 @@ wait_for "chain RPC (block number)" 90 \
 wait_for "TEE service" 90 curl -sf http://127.0.0.1:8000/tee_address
 
 # 3) Decryption nodes (BASE_PORT avoids macOS AirPlay on 5000).
-start_bg decnodes env BASE_PORT="${DEC_BASE_PORT:-5005}" python run_decryption_nodes.py
+start_bg decnodes env PYTHONUNBUFFERED=1 BASE_PORT="${DEC_BASE_PORT:-5005}" python run_decryption_nodes.py
 [ -n "${DECRYPTION_NODE_URLS:-}" ] || die "DECRYPTION_NODE_URLS not set in .env — run 'make sync'"
 IFS=',' read -ra _NODES <<< "$DECRYPTION_NODE_URLS"
 for url in "${_NODES[@]}"; do
@@ -32,6 +32,6 @@ for url in "${_NODES[@]}"; do
 done
 
 # 4) Oracle agents (one per ORACLE_KEYS entry).
-start_bg oracles python run_oracle_agents.py
+start_bg oracles env PYTHONUNBUFFERED=1 python run_oracle_agents.py
 
 log "up complete. 'make status' to inspect · 'make demo' to run · 'make down' to stop."
