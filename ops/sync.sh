@@ -7,13 +7,13 @@ activate_venv
 mkdir -p "$ROOT/kd" "$ROOT/out/ConfidentialCompute.sol"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
-log "pulling shared config from tee-node:~/rmbs_cc_demo/share/ ..."
+log "pulling shared config from tee-node:$SHARE_DIR/ ..."
 gcloud compute scp --tunnel-through-iap --zone="$ZONE_A" \
-  tee-node:~/rmbs_cc_demo/share/members.env "$TMP/members.env"
+  tee-node:"$SHARE_DIR/members.env" "$TMP/members.env"
 gcloud compute scp --tunnel-through-iap --zone="$ZONE_A" \
-  tee-node:~/rmbs_cc_demo/share/umbral_state.json "$TMP/umbral_state.json"
+  tee-node:"$SHARE_DIR/umbral_state.json" "$TMP/umbral_state.json"
 gcloud compute scp --tunnel-through-iap --zone="$ZONE_A" \
-  tee-node:~/rmbs_cc_demo/share/ConfidentialCompute.json "$TMP/ConfidentialCompute.json"
+  tee-node:"$SHARE_DIR/ConfidentialCompute.json" "$TMP/ConfidentialCompute.json"
 
 cp "$TMP/umbral_state.json" "$ROOT/kd/umbral_state.json"
 cp "$TMP/ConfidentialCompute.json" "$ROOT/out/ConfidentialCompute.sol/ConfidentialCompute.json"

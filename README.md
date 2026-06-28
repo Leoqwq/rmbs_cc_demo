@@ -44,9 +44,12 @@ forge build
 ## Quick start (make)
 
 Teammates sharing the existing cloud deployment. Prerequisites: a working `.venv` (see Setup
-above if missing), an authenticated `gcloud`, and IAM to start/stop the instances + open IAP
-tunnels. The shared VMs are stopped by default to save cost, so a session bookends with
-`infra-up` / `infra-down` (the TEE auto-starts on boot, so no SSH is needed to bring it up):
+above if missing); an authenticated `gcloud` (`gcloud auth login` — the ops scripts pin the
+GCP project, so you don't need to set it); and IAM to **start/stop the instances, open IAP
+tunnels, and SSH to `tee-node`** (`make sync`/`make up` scp from / port-forward to it — if the
+project enforces OS Login you also need `roles/compute.osLogin`). The shared VMs are stopped by
+default to save cost, so a session bookends with `infra-up` / `infra-down` (the TEE auto-starts
+on boot, so no SSH is needed to bring it up):
 ```bash
 make sync       # one-time per machine: pull shared config + ABI + umbral state, run doctor
 make infra-up   # start the shared cloud VMs (wait ~1 min; the TEE auto-starts on boot)

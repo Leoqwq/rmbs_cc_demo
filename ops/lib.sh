@@ -13,6 +13,16 @@ INSTANCES_A="bootnode-a validator-1 validator-4 tee-node"
 INSTANCES_B="bootnode-b validator-2"
 INSTANCES_C="validator-3"
 
+# Pin the GCP project so the ops scripts never depend on the caller's gcloud default — a
+# teammate whose active project differs would otherwise misroute every command. Override
+# with PROJECT=... if the deployment ever moves.
+export CLOUDSDK_CORE_PROJECT="${PROJECT:-rmbs-495107}"
+
+# User-independent share dir on tee-node for the member config bundle (publish-config writes
+# it, sync reads it). Absolute on purpose: a `~` path resolves to *different* homes for the
+# owner (who publishes) vs a teammate (who syncs), which would break sync for real teammates.
+SHARE_DIR="/opt/rmbs-share"
+
 log()  { printf '\033[36m[ops]\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m[ops]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[31m[ops] %s\033[0m\n' "$*" >&2; exit 1; }
