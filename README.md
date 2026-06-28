@@ -34,10 +34,9 @@ and **`docs/TROUBLESHOOTING.md`** for operational gotchas + troubleshooting.
 
 ## Setup
 
-Everyone — clone the repo and `cd` into it (all `make` / `python` commands below are run
-from the repo root), then create the Python environment:
+Everyone — `cd` into the cloned repo (all `make` / `python` commands below run from the repo
+root), then create the Python environment:
 ```bash
-git clone <rmbs_cc_demo repo URL>   # ask the owner for the URL
 cd rmbs_cc_demo                      # the repo root — every make/python command runs from here
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
