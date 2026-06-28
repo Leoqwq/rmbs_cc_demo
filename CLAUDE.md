@@ -45,9 +45,11 @@ forge test --match-test test_QuorumFinalizesAtThreshold -vv   # one test
 
 There is no separate linter/build for Python; the offline test suites (`pytest tests/`,
 `forge test` = 6 tests) are the gate. The live end-to-end run is driven by the **`make`
-targets** (`make help`): teammates sharing the deployment use `make sync` → `make up` →
-`make demo` → `make down`; the infra owner uses `make infra-up` / `make bootstrap`
-(idempotent) / `make publish-config` / `make infra-down`. The bash glue lives in `ops/`
+targets** (`make help`): teammates sharing the deployment use `make sync` → `make infra-up`
+→ `make up` → `make demo` → `make down` → `make infra-down` (the TEE auto-starts on boot, so
+`infra-up`/`infra-down` need no SSH and are teammate-runnable with start/stop + IAP perms);
+the owner does one-time setup with `make tee-install` / `make bootstrap` (idempotent) /
+`make publish-config` (and `make tee-deploy` to update TEE code). The bash glue lives in `ops/`
 with unit-tested Python helpers (`config_env.py`, `provision_checks.py`, `doctor.py`).
 Operational gotchas + troubleshooting: **`docs/TROUBLESHOOTING.md`**.
 

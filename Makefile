@@ -1,6 +1,6 @@
 # RMBS Confidential Compute — startup automation.
-# Teammate flow:  make sync -> make up -> make demo -> make down
-# Owner flow:     make infra-up -> make bootstrap -> make publish-config (... make infra-down)
+# Teammate flow:  make sync -> infra-up -> up -> demo -> down -> infra-down
+# Owner setup (one-time):  make tee-install -> bootstrap -> publish-config
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
@@ -10,8 +10,8 @@ PAF ?= 1000000
 .PHONY: help doctor sync up down status demo result infra-up infra-down bootstrap publish-config tee-install tee-deploy tee-restart tee-logs
 
 help: ## show this help
-	@echo "Teammate:  make sync | up | demo | down | status | doctor"
-	@echo "Owner:     make infra-up | infra-down | bootstrap | publish-config"
+	@echo "Teammate:  make sync | infra-up | up | demo | down | infra-down | status | doctor"
+	@echo "Owner:     make tee-install | bootstrap | publish-config | tee-deploy | tee-restart | tee-logs"
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
 	  awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -42,10 +42,10 @@ result: ## read a finalized result on-chain by id: make result ID=10
 	@[ -n "$(ID)" ] || { echo "usage: make result ID=<request-id>"; exit 1; }
 	@source .venv/bin/activate && python read_result.py $(ID)
 
-infra-up: ## owner: start shared instances + remote TEE
+infra-up: ## start the shared cloud instances (TEE auto-starts on boot; needs start/stop + IAP perms)
 	@bash ops/infra_up.sh
 
-infra-down: ## owner: stop shared instances
+infra-down: ## stop the shared cloud instances (cost control)
 	@bash ops/infra_down.sh
 
 bootstrap: ## owner: idempotent ensure-provisioned (no-op when already done)

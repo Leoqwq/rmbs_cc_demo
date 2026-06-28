@@ -43,17 +43,25 @@ forge build
 
 ## Quick start (make)
 
-Teammates sharing the existing cloud deployment:
-
-Prerequisite: a working `.venv` (see Setup above if missing) and an authenticated `gcloud`.
+Teammates sharing the existing cloud deployment. Prerequisites: a working `.venv` (see Setup
+above if missing), an authenticated `gcloud`, and IAM to start/stop the instances + open IAP
+tunnels. The shared VMs are stopped by default to save cost, so a session bookends with
+`infra-up` / `infra-down` (the TEE auto-starts on boot, so no SSH is needed to bring it up):
 ```bash
-make sync     # one-time per machine: pull shared config + ABI + umbral state, run doctor
-make up       # open tunnels, start decryption nodes + oracle agents (health-gated)
-make demo     # submit a request and read the finalized result
-make down     # stop local processes (shared infra keeps running)
+make sync       # one-time per machine: pull shared config + ABI + umbral state, run doctor
+make infra-up   # start the shared cloud VMs (wait ~1 min; the TEE auto-starts on boot)
+make up         # open tunnels, start decryption nodes + oracle agents (health-gated)
+make demo       # submit a request and read the finalized result
+make down       # stop local processes (tunnels/nodes/agents)
+make infra-down # stop the shared cloud VMs when done (cost control)
 ```
+Run the demo one person at a time — the VMs and oracle keys are shared.
 
-Owner (manages the shared infra): `make infra-up`, `make bootstrap` (idempotent — safe to re-run; no-op when already provisioned), `make publish-config`, `make infra-down`. Run `make help` for all targets. Operational gotchas + troubleshooting live in `docs/TROUBLESHOOTING.md`.
+One-time **owner** setup, before teammates can `sync`/run: `make tee-install` (install the
+`rmbs-tee` systemd service on `tee-node`), `make bootstrap` (deploy contract, keygen, fund —
+idempotent), `make publish-config` (push the member config bundle). Updating TEE code later:
+`make tee-deploy` (then `make tee-restart` / `make tee-logs`). `make help` lists every target;
+operational gotchas + troubleshooting live in `docs/TROUBLESHOOTING.md`.
 
 ### What each step does
 `make up` opens the two IAP tunnels (chain RPC + TEE, bound to `127.0.0.1`), gates on chain
