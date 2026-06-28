@@ -90,6 +90,12 @@ make up         # open tunnels, start decryption nodes + oracle agents (health-g
 make demo       # submit a request and read the finalized result
 make down       # stop local processes (tunnels/nodes/agents)
 make infra-down # stop the shared cloud VMs when done (cost control)
+
+# --- auxiliary commands (run any time, not part of the fixed flow) ---
+make help          # list every target with a one-line description
+make doctor        # preflight checks (after `make up`): gcloud / .env / RPC / TEE / nodes
+make status        # show tracked local processes + chain/TEE reachability
+make result ID=10  # read a finalized result back from the chain by request id
 ```
 Run the demo one person at a time — the VMs and oracle keys are shared.
 
