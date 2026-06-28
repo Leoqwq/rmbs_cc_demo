@@ -9,6 +9,10 @@ activate_venv
 
 warn "Run the demo ONE PERSON AT A TIME — teammates share oracle keys; concurrent agents collide on nonces."
 
+# Ensure tee-node is up + SSH-ready before opening tunnels — the TEE port-forward SSHes into
+# it, so a stopped node (forgot 'make infra-up') or one still booting would fail with [4003].
+wait_for_ssh tee-node "$ZONE_A"
+
 # 1) Tunnels (chain RPC + TEE port-forward). 127.0.0.1 everywhere (Besu allowlist + IPv4).
 start_bg tunnel-chain gcloud compute start-iap-tunnel validator-1 8545 \
   --local-host-port=127.0.0.1:8545 --zone="$ZONE_A"

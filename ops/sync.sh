@@ -7,6 +7,8 @@ activate_venv
 mkdir -p "$ROOT/kd" "$ROOT/out/ConfidentialCompute.sol"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
+# sync scp's from tee-node, so it must be up + SSH-ready (run 'make infra-up' first).
+wait_for_ssh tee-node "$ZONE_A"
 log "pulling shared config from tee-node:$SHARE_DIR/ ..."
 gcloud compute scp --tunnel-through-iap --zone="$ZONE_A" \
   tee-node:"$SHARE_DIR/members.env" "$TMP/members.env"

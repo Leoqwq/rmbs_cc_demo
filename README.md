@@ -77,8 +77,8 @@ shared deployment, so you never create or hand-fill `.env`.
 The shared VMs are stopped by default to save cost, so a session bookends with `infra-up` /
 `infra-down` (the TEE auto-starts on boot, so no SSH is needed to bring it up):
 ```bash
-make sync       # one-time per machine: pull shared config + ABI + umbral state, run doctor
-make infra-up   # start the shared cloud VMs (wait ~1 min; the TEE auto-starts on boot)
+make infra-up   # start the shared cloud VMs (incl. tee-node); wait ~1 min for them to boot
+make sync       # FIRST run on this machine only: pull config + ABI + umbral state from tee-node
 make up         # open tunnels, start decryption nodes + oracle agents (health-gated)
 make demo       # submit a request and read the finalized result
 make down       # stop local processes (tunnels/nodes/agents)
@@ -90,8 +90,10 @@ make doctor        # preflight checks (after `make up`): gcloud / .env / RPC / T
 make status        # show tracked local processes + chain/TEE reachability
 make result ID=N   # read a finalized result back from the chain by request id (N)
 ```
-Run every `make` command from the repo root (where the `Makefile` is), and run the demo one
-person at a time — the VMs and oracle keys are shared.
+`make sync` is one-time per machine and **must run after `infra-up`** (it pulls from
+`tee-node`, which has to be running); later sessions are just `infra-up → up → demo → down →
+infra-down`. Run every `make` command from the repo root, and run the demo one person at a
+time — the VMs and oracle keys are shared.
 
 ### What each step does
 - **`make up`** opens the two IAP tunnels (chain RPC + TEE, bound to `127.0.0.1`), gates on
