@@ -46,7 +46,7 @@ and **`docs/TROUBLESHOOTING.md`** for operational gotchas + troubleshooting.
 `cd` into the cloned repo (every `make` / `python` command runs from the repo root), then
 create the Python environment:
 ```bash
-cd rmbs_cc_demo                      # the repo root — every make/python command runs from here
+cd rmbs_cc_demo                      # the demo repo root
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
@@ -88,7 +88,7 @@ make infra-down # stop the shared cloud VMs when done (cost control)
 make help          # list every target with a one-line description
 make doctor        # preflight checks (after `make up`): gcloud / .env / RPC / TEE / nodes
 make status        # show tracked local processes + chain/TEE reachability
-make result ID=10  # read a finalized result back from the chain by request id
+make result ID=N   # read a finalized result back from the chain by request id (N)
 ```
 Run every `make` command from the repo root (where the `Makefile` is), and run the demo one
 person at a time — the VMs and oracle keys are shared.
@@ -137,7 +137,7 @@ compute path:
   TEE (boundary in `tee/encryption_seam.py`).
 
 Not yet redundant: the **TEE itself is a single node**. Surviving a TEE outage
-needs multiple TEEs + quorum (whitepaper's compute-enclave pool) — a separate,
+needs multiple TEEs + quorum (the white-paper's compute-enclave pool) — a separate,
 cloud-cost-incurring step.
 
 ---
