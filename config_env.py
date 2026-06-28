@@ -19,6 +19,11 @@ import time
 
 _LINE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 
+# Backups go in a subdirectory next to the target (e.g. .env-backups/ beside .env),
+# named with the local date + 24h time, so the repo root stays clean and backups sort
+# chronologically. The whole directory is gitignored.
+BACKUP_DIRNAME = ".env-backups"
+
 
 def _read_lines(path):
     if not os.path.exists(path):
@@ -53,11 +58,27 @@ def _key_line_indexes(lines, key):
     return idxs
 
 
+def _make_backup(path):
+    """Copy `path` into its sibling BACKUP_DIRNAME with a local YYYYMMDD-HHMMSS name.
+    Disambiguates with a -N suffix if several writes land in the same second."""
+    directory = os.path.dirname(os.path.abspath(path))
+    backup_dir = os.path.join(directory, BACKUP_DIRNAME)
+    os.makedirs(backup_dir, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")  # local time, 24-hour
+    base = os.path.join(backup_dir, f"{os.path.basename(path)}.{stamp}")
+    backup = f"{base}.bak"
+    n = 2
+    while os.path.exists(backup):
+        backup = f"{base}-{n}.bak"
+        n += 1
+    shutil.copy2(path, backup)
+    return backup
+
+
 def _atomic_write(path, lines):
     backup = None
     if os.path.exists(path):
-        backup = f"{path}.bak.{time.time_ns()}"
-        shutil.copy2(path, backup)
+        backup = _make_backup(path)
     directory = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".env.tmp.")
     try:

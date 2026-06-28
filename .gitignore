@@ -15,4 +15,6 @@ oracle_state_*.json
 oracle_state_*.json.tmp
 node_modules/
 .run/
-.env.bak.*
+.env.*
+.env-backups/
+!.env.example

@@ -38,7 +38,7 @@ def test_no_change_writes_no_backup(tmp_path):
     p = write(tmp_path / ".env", "A=1\n")
     res = ce.set_keys(p, {"A": "9"})  # skipped
     assert res["backup"] is None
-    assert not list(tmp_path.glob(".env.bak.*"))
+    assert not (tmp_path / ce.BACKUP_DIRNAME).exists()  # no backup dir created on no-op
 
 
 def test_change_writes_backup_and_preserves_other_keys(tmp_path):
@@ -46,6 +46,28 @@ def test_change_writes_backup_and_preserves_other_keys(tmp_path):
     res = ce.set_keys(p, {"C": "3"})
     assert res["backup"] is not None and os.path.exists(res["backup"])
     assert ce.parse_env(p) == {"A": "1", "B": "2", "C": "3"}
+
+
+def test_backup_lives_in_backup_dir_with_dated_name(tmp_path):
+    import re as _re
+    p = write(tmp_path / ".env", "A=1\n")
+    res = ce.set_keys(p, {"B": "2"})
+    backup = res["backup"]
+    # backup is inside <dir>/.env-backups/ and named .env.YYYYMMDD-HHMMSS.bak (local time)
+    assert os.path.dirname(backup) == str(tmp_path / ce.BACKUP_DIRNAME)
+    assert _re.fullmatch(r"\.env\.\d{8}-\d{6}\.bak", os.path.basename(backup))
+    assert (tmp_path / ".env").read_text() != ""  # original captured before overwrite
+
+
+def test_same_second_backups_do_not_collide(tmp_path, monkeypatch):
+    # Freeze the timestamp so two writes in the same second would otherwise collide.
+    monkeypatch.setattr(ce.time, "strftime", lambda *_a, **_k: "20260627-120000")
+    p = write(tmp_path / ".env", "A=1\n")
+    b1 = ce.set_keys(p, {"B": "2"})["backup"]
+    b2 = ce.set_keys(p, {"C": "3"})["backup"]
+    assert b1 != b2 and os.path.exists(b1) and os.path.exists(b2)
+    assert os.path.basename(b2).endswith("-2.bak")
+
 
 
 def test_merge_file_pulls_keys(tmp_path):
