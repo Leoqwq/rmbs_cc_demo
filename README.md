@@ -33,13 +33,25 @@ and **`docs/TROUBLESHOOTING.md`** for operational gotchas + troubleshooting.
   default to control cost) — `make infra-up` does this.
 
 ## Setup
+
+Everyone — clone the repo, then create the Python environment:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # fill in DEPLOYER_PRIVATE_KEY, CONTRACT_ADDRESS, TEE_ADDRESS, DECRYPTION_NODE_URLS
+```
+
+**Teammates stop here.** `make sync` populates `.env` (plus the contract ABI and umbral
+state) from the shared deployment — do **not** create or hand-fill `.env`, and you don't
+need Foundry.
+
+**Owner only**, for a fresh/standalone deployment (teammates skip this): install Foundry,
+then
+```bash
+cp .env.example .env   # fill in DEPLOYER_PRIVATE_KEY etc. (see the comments in the file)
 forge install foundry-rs/forge-std
 forge build
 ```
+followed by `make tee-install` → `make bootstrap` → `make publish-config` (see Quick start).
 
 ## Quick start (make)
 
