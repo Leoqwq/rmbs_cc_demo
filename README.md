@@ -166,6 +166,12 @@ make publish-config  # publish the member bundle to /opt/rmbs-share on tee-node
 After `publish-config`, teammates can `make sync`. `make bootstrap` is safe to re-run; it
 only acts on what's missing/changed and is a no-op otherwise.
 
+`make bootstrap` reaches the chain + TEE over the local `127.0.0.1` tunnels, so they must be
+open first: on an **existing** deployment run `make up` (it opens them); on a **brand-new**
+one — where `make up` can't start yet (no contract/umbral state) — open just the two tunnels
+`make up` uses (`start-iap-tunnel validator-1 8545 → 127.0.0.1:8545`, and `ssh tee-node -L
+127.0.0.1:8000:127.0.0.1:8000`) before running it.
+
 ## Onboard a teammate (IAM)
 Grant the teammate's Google account these **project** roles:
 - *Compute OS Login* — SSH into `tee-node` (the project enforces OS Login).

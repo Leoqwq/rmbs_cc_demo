@@ -6,6 +6,7 @@ load_env
 FORGE="${FORGE:-$HOME/.foundry/bin/forge}"
 ABI="$ROOT/out/ConfidentialCompute.sol/ConfidentialCompute.json"
 
+wait_for_ssh tee-node "$ZONE_A"
 log "building ABI for the member bundle..."
 ( cd "$ROOT" && "$FORGE" build >/dev/null )
 [ -f "$ABI" ] || die "ABI not found at $ABI after forge build"

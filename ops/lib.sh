@@ -83,3 +83,32 @@ wait_for_ssh() {  # wait_for_ssh <instance> <zone> [max_tries=8]  — wait until
   done
   log "$inst SSH-ready."
 }
+
+rpc_block() {  # rpc_block <rpc_url>  — echo the current block number (decimal), empty on failure
+  local out hex
+  out="$(curl -sf -m 5 -X POST -H 'content-type: application/json' \
+    --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' "$1" 2>/dev/null || true)"
+  hex="$(printf '%s' "$out" | sed -n 's/.*"result":"\(0x[0-9a-fA-F]*\)".*/\1/p')"
+  [ -n "$hex" ] && printf '%d' "$hex" || true
+}
+
+wait_for_blocks() {  # wait_for_blocks <rpc_url> <max_secs>  — wait until the chain is actually
+                     # PRODUCING blocks (number advances), not just answering RPC. A sub-quorum
+                     # QBFT chain (<3 of 4 validators) answers RPC but never advances → catching
+                     # it here beats a later submit() that hangs forever.
+  local url="$1" max="$2" waited=0 b0="" b1
+  while [ -z "$b0" ]; do                       # phase 1: RPC reachable (tunnel established)
+    b0="$(rpc_block "$url" || true)"
+    [ -n "$b0" ] && break
+    [ "$waited" -ge "$max" ] && die "chain RPC $url unreachable after ${max}s — is the tunnel open / 'make infra-up' done?"
+    sleep 2; waited=$((waited + 2))
+  done
+  while :; do                                  # phase 2: block number advances
+    sleep 3; waited=$((waited + 3))
+    b1="$(rpc_block "$url" || true)"
+    if [ -n "$b1" ] && [ "$b1" -gt "$b0" ]; then
+      log "ready: chain producing blocks ($b0 -> $b1)"; return 0
+    fi
+    [ "$waited" -ge "$max" ] && die "chain reachable but NOT producing blocks after ${max}s — need >=3 of 4 validators online (see docs/TROUBLESHOOTING.md)"
+  done
+}

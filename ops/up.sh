@@ -19,11 +19,9 @@ start_bg tunnel-chain gcloud compute start-iap-tunnel validator-1 8545 \
 start_bg tunnel-tee gcloud compute ssh tee-node --zone="$ZONE_A" --tunnel-through-iap \
   -- -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 127.0.0.1:8000:127.0.0.1:8000
 
-# 2) Health gates.
-wait_for "chain RPC (block number)" 90 \
-  curl -sf -X POST -H 'content-type: application/json' \
-  --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-  http://127.0.0.1:8545
+# 2) Health gates. The chain gate requires real block PRODUCTION (not just an RPC reply), so
+#    a sub-quorum chain (<3 validators) is caught here rather than hanging a later submit().
+wait_for_blocks http://127.0.0.1:8545 90
 wait_for "TEE service" 90 curl -sf http://127.0.0.1:8000/tee_address
 
 # 3) Decryption nodes (BASE_PORT avoids macOS AirPlay on 5000).
