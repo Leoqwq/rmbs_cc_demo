@@ -34,8 +34,11 @@ and **`docs/TROUBLESHOOTING.md`** for operational gotchas + troubleshooting.
 
 ## Setup
 
-Everyone — clone the repo, then create the Python environment:
+Everyone — clone the repo and `cd` into it (all `make` / `python` commands below are run
+from the repo root), then create the Python environment:
 ```bash
+git clone <rmbs_cc_demo repo URL>   # ask the owner for the URL
+cd rmbs_cc_demo                      # the repo root — every make/python command runs from here
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
@@ -97,7 +100,8 @@ make doctor        # preflight checks (after `make up`): gcloud / .env / RPC / T
 make status        # show tracked local processes + chain/TEE reachability
 make result ID=10  # read a finalized result back from the chain by request id
 ```
-Run the demo one person at a time — the VMs and oracle keys are shared.
+Run every `make` command from the repo root (where the `Makefile` is), and run the demo one
+person at a time — the VMs and oracle keys are shared.
 
 One-time **owner** setup, before teammates can `sync`/run: `make tee-install` (install the
 `rmbs-tee` systemd service on `tee-node`), `make bootstrap` (deploy contract, keygen, fund —
