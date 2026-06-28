@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_DIR="$ROOT/.run"
 mkdir -p "$RUN_DIR"
 
-# Instance -> zone layout (from RUNBOOK stage 0).
+# Instance -> zone layout.
 ZONE_A="us-central1-a"; ZONE_B="us-central1-b"; ZONE_C="us-central1-c"
 INSTANCES_A="bootnode-a validator-1 validator-4 tee-node"
 INSTANCES_B="bootnode-b validator-2"
@@ -23,7 +23,7 @@ load_env() {
 }
 
 activate_venv() {
-  [ -f "$ROOT/.venv/bin/activate" ] || die ".venv missing — create it (see RUNBOOK stage 1)"
+  [ -f "$ROOT/.venv/bin/activate" ] || die ".venv missing — create it (see README Setup)"
   # shellcheck disable=SC1091
   . "$ROOT/.venv/bin/activate"
 }

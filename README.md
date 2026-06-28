@@ -18,18 +18,19 @@ receiving key by the decryption nodes, and decrypted only inside the TEE — the
 boundary lives in `tee/encryption_seam.py`. Remaining deliberate simplifications
 are tracked in `docs/FUTURE_WORK.md`.
 
-See `docs/superpowers/specs/2026-06-16-encryption-decryption-don-design.md` for the
+Running it is automated via `make` (see **Quick start** below; `make help` lists every
+target). See `docs/superpowers/specs/2026-06-16-encryption-decryption-don-design.md` for the
 encryption / decryption-DON design (and `…/2026-06-03-rmbs-cc-waterfall-demo-design.md`
 for the base waterfall demo), `private_chain/TEE.md` (in the RMBS vault) for the TEE VM,
-and **`RUNBOOK.md` for the full, tested step-by-step end-to-end procedure** (start
-here if you're actually running the demo).
+and **`docs/TROUBLESHOOTING.md`** for operational gotchas + troubleshooting.
 
 ## Prerequisites
-- Local: Foundry (`forge`), Python 3.10+.
-- `tee-node` (Ubuntu): `sudo apt-get install -y python3-venv python3-pip` before
-  creating the venv there.
+- Local: Python 3.10+ and a working `.venv` (see Setup); an authenticated `gcloud` with
+  IAP access. Foundry (`forge`) is needed only by the infra **owner** (deploy/build);
+  teammates who `make sync` an existing deployment do not need it.
+- `tee-node` (Ubuntu, owner one-time): `sudo apt-get install -y python3-venv python3-pip tmux`.
 - The Besu chain and the `tee-node` confidential VM started (both are stopped by
-  default to control cost).
+  default to control cost) — `make infra-up` does this.
 
 ## Setup
 ```bash
@@ -44,7 +45,7 @@ forge build
 
 Teammates sharing the existing cloud deployment:
 
-Prerequisite: a working `.venv` (see RUNBOOK stage 1 if missing) and an authenticated `gcloud`.
+Prerequisite: a working `.venv` (see Setup above if missing) and an authenticated `gcloud`.
 ```bash
 make sync     # one-time per machine: pull shared config + ABI + umbral state, run doctor
 make up       # open tunnels, start decryption nodes + oracle agents (health-gated)
@@ -52,90 +53,17 @@ make demo     # submit a request and read the finalized result
 make down     # stop local processes (shared infra keeps running)
 ```
 
-Owner (manages the shared infra): `make infra-up`, `make bootstrap` (idempotent — safe to re-run; no-op when already provisioned), `make publish-config`, `make infra-down`. Run `make help` for all targets. `RUNBOOK.md` remains the manual procedure + troubleshooting.
+Owner (manages the shared infra): `make infra-up`, `make bootstrap` (idempotent — safe to re-run; no-op when already provisioned), `make publish-config`, `make infra-down`. Run `make help` for all targets. Operational gotchas + troubleshooting live in `docs/TROUBLESHOOTING.md`.
 
-## Run the demo
-Open separate terminals.
-
-1. **Tunnels** (chain RPC + TEE service). Use `127.0.0.1` (not `localhost`): the
-   Besu RPC host-allowlist only permits `127.0.0.1`, and forcing IPv4 avoids the
-   `::1` connect-refused on the TEE forward.
-   ```bash
-   gcloud compute start-iap-tunnel validator-1 8545 \
-     --local-host-port=127.0.0.1:8545 --zone=us-central1-a
-   gcloud compute ssh tee-node --zone=us-central1-a --tunnel-through-iap \
-     -- -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 8000:127.0.0.1:8000
-   ```
-2. **TEE service** — SSH into `tee-node`, then run it under `tmux` (so it survives
-   SSH/tunnel drops). Note the printed TEE address and put it in `.env` as
-   `TEE_ADDRESS`:
-   ```bash
-   # from your local machine — open a shell on the confidential VM
-   gcloud compute ssh tee-node --zone=us-central1-a --tunnel-through-iap
-   # --- now inside tee-node ---
-   tmux new -s tee
-   cd ~/rmbs_cc_demo && source .venv/bin/activate && python -m tee.tee_service
-   # Ctrl-b then d to detach; service keeps running. (First-time node setup:
-   # sudo apt-get install -y python3-venv python3-pip tmux; see RUNBOOK.md stage 1.)
-   ```
-3. **Key setup** (one-time) — generate the threshold re-encryption keys, then copy
-   the public state to the TEE node (the enclave reads it to verify cfrags and
-   decrypt; skipping the copy makes `/compute` fail with `No such file …umbral_state.json`):
-   ```bash
-   python keygen.py --shares 3 --threshold 2   # writes kd/umbral_state.json
-   gcloud compute scp --tunnel-through-iap --zone=us-central1-a \
-     kd/umbral_state.json tee-node:~/rmbs_cc_demo/kd/umbral_state.json
-   ```
-   > `--threshold` is the umbral re-encryption quorum (m of `--shares` decryption
-   > nodes); it is independent of the oracle `THRESHOLD` below.
-4. **Generate oracle keys** (one per validator host, default n=4 m=3):
-   ```bash
-   # generate four keys with cast wallet new (or any keygen tool)
-   # put the four 0x addresses in .env as ORACLE_ADDRESSES (comma-separated)
-   # put THRESHOLD=3 in .env
-   ```
-5. **Deploy the contract** (uses `TEE_ADDRESS`, `ORACLE_ADDRESSES`, `THRESHOLD`,
-   `DEPLOYER_PRIVATE_KEY`). Put the printed address in `.env` as `CONTRACT_ADDRESS`:
-   ```bash
-   set -a; source .env; set +a     # export so forge sees the vars
-   forge script script/Deploy.s.sol:Deploy --rpc-url "$RPC_URL" --broadcast --legacy
-   ```
-   > The chain is not actually gas-free (validators didn't set `--min-gas-price=0`),
-   > so do NOT pass `--gas-price 0`; forge legacy uses the node's price. The Python
-   > scripts likewise use `w3.eth.gas_price`.
-6. **Fund oracle accounts** (one-time gas top-up from the deployer):
-   ```bash
-   python fund_oracles.py
-   ```
-7. **Decryption DON nodes** — one process per kfrag, each serving `/reencrypt` (no
-   chain txs, no funding). Set `DECRYPTION_NODE_URLS` in `.env` to match the ports:
-   ```bash
-   BASE_PORT=5005 python run_decryption_nodes.py   # 5005.. (avoids macOS AirPlay on 5000)
-   ```
-8. **Oracle DON agents** — start one instance per oracle key (ideally one per
-   validator host, in the VPC). Each agent watches `ComputeRequested`, collects
-   ≥m re-encryption fragments from the decryption nodes, calls the TEE, verifies
-   the request-bound TEE attestation, and posts `attest()` from its own account.
-   Set `ORACLE_ID` and `ORACLE_KEY` differently for each instance:
-   ```bash
-   # agent 1
-   ORACLE_ID=1 ORACLE_KEY=0x<key1> python oracle_agent.py
-   # agent 2 (separate shell/host)
-   ORACLE_ID=2 ORACLE_KEY=0x<key2> python oracle_agent.py
-   # ... (repeat for all N agents)
-   ```
-   The contract finalizes once `THRESHOLD` distinct oracle attestations are
-   recorded. With n=4 m=3, the DON tolerates 1 oracle offline (mirrors QBFT's
-   fault tolerance); the extra oracles beyond m skip attesting once quorum is met.
-   Per-oracle progress is persisted to `oracle_state_<id>.json` so each agent
-   resumes idempotently after a restart.
-9. **Submit a request** and read the result (`submit_request.py` encrypts the
-   inputs client-side before submitting — plaintext never goes on-chain):
-   ```bash
-   python submit_request.py --iaf 500000 --paf 1000000
-   python read_result.py 1
-   # expected: finalized=True  attestations=3/3 (DON quorum)
-   ```
+### What each step does
+`make up` opens the two IAP tunnels (chain RPC + TEE, bound to `127.0.0.1`), gates on chain
++ TEE health, then starts the decryption-DON nodes and the oracle-DON agents locally (one
+per `ORACLE_KEYS` entry), tracking PIDs/logs in `.run/`. `make demo` encrypts the inputs
+client-side, submits the ciphertext (plaintext never goes on-chain), waits for the m-of-n
+oracle quorum, prints the result, and archives it to `demo-results/`. `make result ID=N`
+reads any finalized result back from the chain. The owner's `make bootstrap` performs the
+one-time provisioning (deploy, keygen, oracle funding) and is a no-op once done; the
+mechanics of each are in the design spec referenced above.
 
 ## Verify
 The on-chain `resultJson` must equal a local run of the engine on the same
@@ -181,4 +109,5 @@ needs multiple TEEs + quorum (whitepaper's compute-enclave pool) — a separate,
 cloud-cost-incurring step.
 
 ## Cost
-Stop the chain and `tee-node` when done (`gcloud compute instances stop ...`).
+Stop the chain and `tee-node` when done: `make infra-down` (and `make down` to stop the
+local tunnels/nodes/agents first).

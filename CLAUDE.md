@@ -43,11 +43,13 @@ forge test -vv                                   # contract tests
 forge test --match-test test_QuorumFinalizesAtThreshold -vv   # one test
 ```
 
-There is no separate linter/build for Python; the offline test suites (`pytest tests/`
-= 29 tests, `forge test` = 6 tests) are the gate. Most components require the live Besu
-chain + TEE VM and are exercised manually — **`RUNBOOK.md` is the authoritative
-operational guide** (it tags every step as first-time-only vs every-run and has a
-troubleshooting section).
+There is no separate linter/build for Python; the offline test suites (`pytest tests/`,
+`forge test` = 6 tests) are the gate. The live end-to-end run is driven by the **`make`
+targets** (`make help`): teammates sharing the deployment use `make sync` → `make up` →
+`make demo` → `make down`; the infra owner uses `make infra-up` / `make bootstrap`
+(idempotent) / `make publish-config` / `make infra-down`. The bash glue lives in `ops/`
+with unit-tested Python helpers (`config_env.py`, `provision_checks.py`, `doctor.py`).
+Operational gotchas + troubleshooting: **`docs/TROUBLESHOOTING.md`**.
 
 ## Architecture (big picture)
 
@@ -119,7 +121,7 @@ If you change a digest's field order/types on one side, change the other and the
 sign helpers, or signatures silently fail to verify on-chain. No single automated test
 crosses both languages — verify by reasoning + the Forge tests + a local hash compare.
 
-## Environment facts that bite (see RUNBOOK troubleshooting)
+## Environment facts that bite (see docs/TROUBLESHOOTING.md)
 
 - The Besu chain is **not gas-free** (validators don't set `--min-gas-price=0`). Never use
   `--gas-price 0`; forge uses `--legacy`, Python uses `w3.eth.gas_price`.
