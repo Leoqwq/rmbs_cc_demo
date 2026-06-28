@@ -7,6 +7,7 @@
 # non-recursive, so `tee/*.py` cannot match anything under tee/kd/.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
+wait_for_ssh tee-node "$ZONE_A"
 log "pushing tee/*.py + tee/engine/*.py + abi_digest.py/umbral_io.py (NOT tee/kd/) ..."
 gcloud compute scp --tunnel-through-iap --zone="$ZONE_A" \
   "$ROOT"/tee/*.py tee-node:~/rmbs_cc_demo/tee/

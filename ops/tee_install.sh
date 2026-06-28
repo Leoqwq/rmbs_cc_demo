@@ -4,6 +4,7 @@
 # existing tee/kd/ signing key is read unchanged (TEE_ADDRESS does not move).
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
+wait_for_ssh tee-node "$ZONE_A"
 log "pushing installer to tee-node ..."
 gcloud compute scp --tunnel-through-iap --zone="$ZONE_A" \
   "$ROOT/ops/install_tee_service.sh" tee-node:~/install_tee_service.sh

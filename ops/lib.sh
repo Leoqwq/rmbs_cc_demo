@@ -56,3 +56,20 @@ wait_for() {  # wait_for <desc> <max_secs> <cmd...>  — poll until cmd succeeds
   done
   log "ready: $desc"
 }
+
+wait_for_ssh() {  # wait_for_ssh <instance> <zone> [max_tries=8]  — wait until the VM accepts
+                  # SSH over IAP (a freshly-started node isn't SSH-ready for ~30-60s: [4003]).
+  local inst="$1" zone="$2" max="${3:-8}" status i=0
+  status="$(gcloud compute instances describe "$inst" --zone="$zone" \
+            --format='value(status)' 2>/dev/null || true)"
+  [ "$status" = "RUNNING" ] \
+    || die "$inst is not RUNNING (status: ${status:-unknown}) — run 'make infra-up' first"
+  until gcloud compute ssh "$inst" --zone="$zone" --tunnel-through-iap --command=true \
+        >/dev/null 2>&1; do
+    i=$((i + 1))
+    [ "$i" -ge "$max" ] && die "$inst not SSH-ready after $max tries — still booting? wait ~30s and retry"
+    warn "$inst not SSH-ready yet (attempt $i/$max, likely still booting) — waiting 15s..."
+    sleep 15
+  done
+  log "$inst SSH-ready."
+}
