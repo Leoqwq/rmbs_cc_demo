@@ -41,7 +41,7 @@ This is why the design is **in-place** (run as the owner, from the owner's exist
   from the existing repo in their home.
 - A one-time owner installer (`ops/install_tee_service.sh` + `make tee-install`).
 - Reworking `make infra-up` to drop the SSH/`tmux` TEE-start step.
-- Owner convenience targets `make tee-restart` and `make tee-logs`.
+- Owner targets `make tee-deploy` (safe code push + restart), `make tee-restart`, `make tee-logs`.
 - Doc updates (`CLAUDE.md`, `docs/TROUBLESHOOTING.md`).
 
 **Out of scope (deliberate)**
@@ -50,8 +50,8 @@ This is why the design is **in-place** (run as the owner, from the owner's exist
 - Changing TEE code, ports (stays `0.0.0.0:8000`), or the key files.
 - Implementing IAM changes — the least-privilege role recommendation (§5) is **advisory text
   in this spec only**, not a code change.
-- TEE code-deployment to `tee-node` (scp of updated `tee/` files) stays the existing manual
-  step; `make tee-restart` only restarts the service after such a deploy.
+- Remote **dependency** installs (`pip install` when `requirements.txt` changes for the TEE)
+  stay a manual owner step; `make tee-deploy` pushes **code only** (`.py`), not dependencies.
 
 ## 4. Components
 
@@ -106,16 +106,25 @@ failure), then print that the TEE auto-starts on boot and `make up` will verify 
 The TEE's liveness is confirmed by `make up`'s existing TEE health-gate (`wait_for "TEE
 service"`), so no verification logic is duplicated in `infra-up`.
 
-### 4.4 Owner convenience targets
+### 4.4 Owner targets (deploy / restart / logs)
 
-- `make tee-restart` → `gcloud compute ssh tee-node --zone=$ZONE_A --tunnel-through-iap
-  --command='sudo systemctl restart rmbs-tee'` (apply newly-scp'd TEE code).
-- `make tee-logs` → `gcloud compute ssh … --command='journalctl -u rmbs-tee -n 50 --no-pager'`
-  (debug a TEE that won't come up).
+All owner-only (need SSH + sudo); members never use them. Each is an `ops/*.sh` script
+sourcing `ops/lib.sh` for `$ZONE_A`, consistent with the other ops targets and `bash -n`-checkable.
 
-Both are owner-only (need SSH + sudo); members never use them. They live in `ops/tee_restart.sh`
-and `ops/tee_logs.sh` (sourcing `ops/lib.sh` for `$ZONE_A`), consistent with the other ops
-targets and `bash -n`-checkable.
+- `make tee-deploy` (`ops/tee_deploy.sh`) — push updated TEE code to `tee-node` and restart.
+  **Safe by construction:** it scp's **only the `.py` files** the TEE needs and **never
+  `tee/kd/`** (recursing or copying `tee/kd/` would clobber the remote signing/enclave keys →
+  `TEE_ADDRESS` changes → contract redeploy). Concretely:
+  - `tee/*.py` → `tee-node:~/rmbs_cc_demo/tee/`
+  - `tee/engine/*.py` → `tee-node:~/rmbs_cc_demo/tee/engine/`
+  - `abi_digest.py`, `umbral_io.py` → `tee-node:~/rmbs_cc_demo/`
+  - then `sudo systemctl restart rmbs-tee` and a `curl …/tee_address` self-check.
+  (Globs are non-recursive, so `tee/*.py` matches no file under `tee/kd/`.) If a change also
+  touches `requirements.txt`, install the dep on `tee-node` manually first (out of scope, §3).
+- `make tee-restart` (`ops/tee_restart.sh`) → `sudo systemctl restart rmbs-tee` (restart without
+  pushing code).
+- `make tee-logs` (`ops/tee_logs.sh`) → `journalctl -u rmbs-tee -n 50 --no-pager` (debug a TEE
+  that won't come up).
 
 ### 4.5 Migration (one-time, owner)
 
@@ -160,7 +169,8 @@ guidance; granting roles is a console/gcloud action outside this repo.
 
 ## 8. Files touched
 
-**New:** `ops/install_tee_service.sh`, `ops/tee_restart.sh`, `ops/tee_logs.sh`, and the
-rendered `rmbs-tee.service` template (embedded in the installer).
+**New:** `ops/install_tee_service.sh`, `ops/tee_deploy.sh`, `ops/tee_restart.sh`,
+`ops/tee_logs.sh`, and the rendered `rmbs-tee.service` template (embedded in the installer).
 **Modified:** `ops/infra_up.sh` (drop SSH/tmux block), `Makefile` (add `tee-install`,
-`tee-restart`, `tee-logs`; `.PHONY`), `CLAUDE.md`, `docs/TROUBLESHOOTING.md`.
+`tee-deploy`, `tee-restart`, `tee-logs`; `.PHONY`), `CLAUDE.md`, `docs/TROUBLESHOOTING.md`
+(add an "updating TEE code" note pointing at `make tee-deploy`).
