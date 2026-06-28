@@ -7,7 +7,7 @@ SHELL := /bin/bash
 IAF ?= 500000
 PAF ?= 1000000
 
-.PHONY: help doctor sync up down status demo result infra-up infra-down bootstrap publish-config
+.PHONY: help doctor sync up down status demo result infra-up infra-down bootstrap publish-config tee-install tee-deploy tee-restart tee-logs
 
 help: ## show this help
 	@echo "Teammate:  make sync | up | demo | down | status | doctor"
@@ -53,3 +53,15 @@ bootstrap: ## owner: idempotent ensure-provisioned (no-op when already done)
 
 publish-config: ## owner: push config bundle to the shared tee-node
 	@bash ops/publish_config.sh
+
+tee-install: ## owner: install+enable the rmbs-tee systemd service on tee-node (one-time)
+	@bash ops/tee_install.sh
+
+tee-deploy: ## owner: push updated TEE .py code to tee-node + restart (never touches tee/kd/)
+	@bash ops/tee_deploy.sh
+
+tee-restart: ## owner: restart the rmbs-tee service
+	@bash ops/tee_restart.sh
+
+tee-logs: ## owner: tail the rmbs-tee service logs
+	@bash ops/tee_logs.sh
