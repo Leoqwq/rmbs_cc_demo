@@ -66,7 +66,7 @@ def main():
     print(f"Request submitted (encrypted): id={request_id} "
           f"(capsule {len(bytes(capsule))}B, ciphertext {len(bytes(ciphertext))}B)")
     print(f"Inputs are NOT on-chain in plaintext. Read the result later with:")
-    print(f"  python read_result.py {request_id}")
+    print(f"  make result ID={request_id}")
 
 
 if __name__ == "__main__":

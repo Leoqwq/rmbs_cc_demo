@@ -7,7 +7,7 @@ SHELL := /bin/bash
 IAF ?= 500000
 PAF ?= 1000000
 
-.PHONY: help doctor sync up down status demo infra-up infra-down bootstrap publish-config
+.PHONY: help doctor sync up down status demo result infra-up infra-down bootstrap publish-config
 
 help: ## show this help
 	@echo "Teammate:  make sync | up | demo | down | status | doctor"
@@ -37,6 +37,10 @@ demo: ## submit a request, wait, print + archive the result to demo-results/ (ov
 	        | grep -oE 'id=[0-9]+' | head -1 | cut -d= -f2) && \
 	  { [ -n "$$ID" ] || { echo "make demo: could not extract request id — see submit output above"; exit 1; }; } && \
 	  python demo_record.py $$ID --iaf $(IAF) --paf $(PAF)
+
+result: ## read a finalized result on-chain by id: make result ID=10
+	@[ -n "$(ID)" ] || { echo "usage: make result ID=<request-id>"; exit 1; }
+	@source .venv/bin/activate && python read_result.py $(ID)
 
 infra-up: ## owner: start shared instances + remote TEE
 	@bash ops/infra_up.sh
