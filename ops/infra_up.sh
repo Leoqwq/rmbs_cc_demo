@@ -15,7 +15,10 @@ gcloud compute instances start $INSTANCES_C --zone="$ZONE_C" \
   || warn "some instances in $ZONE_C failed to start (capacity?) — continuing; chain still runs if >=3 validators are up"
 
 log "ensuring the TEE service is up on tee-node (tmux session 'tee')..."
-gcloud compute ssh tee-node --zone="$ZONE_A" --tunnel-through-iap --command='
+# A freshly-started tee-node needs ~30-60s before sshd accepts connections; the first SSH
+# right after boot fails with '[4003] Failed to connect to port 22'. Retry until the VM is
+# reachable instead of aborting on that transient boot window.
+TEE_CMD='
   set -e
   if curl -sf http://127.0.0.1:8000/tee_address >/dev/null 2>&1; then
     echo "TEE already running"; exit 0
@@ -26,4 +29,12 @@ gcloud compute ssh tee-node --zone="$ZONE_A" --tunnel-through-iap --command='
     "source .venv/bin/activate && python -m tee.tee_service"
   echo "TEE started in tmux session tee"
 '
+for attempt in $(seq 1 8); do
+  if gcloud compute ssh tee-node --zone="$ZONE_A" --tunnel-through-iap --command="$TEE_CMD"; then
+    break
+  fi
+  [ "$attempt" -eq 8 ] && die "could not SSH to tee-node after 8 tries — it may still be booting; wait ~30s and re-run 'make infra-up'"
+  warn "tee-node not SSH-ready yet (attempt $attempt/8, VM likely still booting) — retrying in 15s..."
+  sleep 15
+done
 log "infra-up done. Open tunnels (make up, or just the tunnels) and confirm block production."
