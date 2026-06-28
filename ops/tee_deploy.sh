@@ -16,7 +16,9 @@ gcloud compute scp --tunnel-through-iap --zone="$ZONE_A" \
   "$ROOT/abi_digest.py" "$ROOT/umbral_io.py" tee-node:~/rmbs_cc_demo/
 
 log "restarting rmbs-tee ..."
+# Poll for readiness ON tee-node (the service can take a few seconds to bind after restart;
+# a hard `sleep 2` would falsely fail a slow start). 127.0.0.1:8000 is local to the node.
 gcloud compute ssh tee-node --zone="$ZONE_A" --tunnel-through-iap \
-  --command='sudo systemctl restart rmbs-tee && sleep 2 && curl -sf http://127.0.0.1:8000/tee_address && echo'
+  --command='sudo systemctl restart rmbs-tee && for _ in $(seq 1 15); do curl -sf http://127.0.0.1:8000/tee_address && echo && exit 0; sleep 2; done; echo "TEE not ready after restart — check: make tee-logs"; exit 1'
 
 log "tee-deploy done (tee/kd/ untouched). If requirements.txt changed, pip install on tee-node first."
