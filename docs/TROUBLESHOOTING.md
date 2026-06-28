@@ -54,6 +54,15 @@ end. Most failures are environment/ordering issues, not code bugs.
 - **`No such file …/kd/umbral_state.json`** → either (local) `keygen` hasn't run, or (on the
   TEE node, path under `/home/<user>/…`) the state wasn't pushed. `make bootstrap` +
   `make publish-config` handle both.
+- **TEE unreachable but tunnel is open** → the `rmbs-tee` service may be down on `tee-node`.
+  Check `make tee-logs` (or `sudo systemctl status rmbs-tee` on the node); `make tee-restart`
+  to bounce it. The service auto-starts on boot; `make infra-up` no longer starts it over SSH,
+  so a member who can start the VM no longer needs SSH access to bring the TEE up.
+- **Updating TEE code** → edit `tee/*.py` (or `abi_digest.py`/`umbral_io.py`) locally, then
+  `make tee-deploy` (pushes `.py` only + restarts). **Never** `scp --recurse tee/` or copy
+  `tee/kd/` to the node — that overwrites the remote signing/enclave keys, changing
+  `TEE_ADDRESS` and forcing a contract redeploy. If `requirements.txt` changed, `pip install`
+  on `tee-node` first, then `make tee-restart`.
 
 ## Networking / tunnels
 

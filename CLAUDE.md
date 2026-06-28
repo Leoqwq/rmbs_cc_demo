@@ -82,6 +82,10 @@ Component map:
   `sample_deal.py` is the built-in deal. `engine/` is **vendored verbatim** from
   `rmbs_platform/engine/` (5 files: loader, state, compute, audit_trail, waterfall) — do
   not edit it to "fix" waterfall behavior; it mirrors upstream.
+  On `tee-node` the service runs as the **`rmbs-tee` systemd service** (auto-starts on boot;
+  installed once via `make tee-install`), not a manual `tmux` session; `make infra-up` no
+  longer SSHes to start it. Push TEE code changes with `make tee-deploy` (restart via
+  `make tee-restart`, logs via `make tee-logs`).
 - `keygen.py` — trusted-dealer setup (run once). Fetches the enclave's public key via
   `GET /enclave_pubkey`, generates a master Umbral keypair, splits it into kfrags
   (one per decryption node), and writes `kd/umbral_state.json` (master pubkey + kfrags).
@@ -102,6 +106,19 @@ Component map:
 - `submit_request.py` / `read_result.py` / `fund_oracles.py` — user CLIs. `submit_request.py`
   encrypts inputs client-side (fetches the enclave pubkey, encrypts with pyUmbral) before
   calling `submitRequest(capsule, ciphertext)`.
+
+### Deploying TEE code: never copy `tee/kd/` to `tee-node`
+
+`tee/kd/tee_signing_key.json` (whose address is the on-chain `TEE_ADDRESS`) and
+`tee/kd/enclave_enc_key.json` live **only** on `tee-node` and must never be overwritten by a
+local copy. `scp --recurse tee/` or copying `tee/kd/` from your machine replaces them →
+`TEE_ADDRESS` changes → the deployed contract must be redeployed and umbral keys regenerated.
+Always deploy TEE code with **`make tee-deploy`**, which copies only `.py` files (non-recursive
+globs, never `tee/kd/`). Relatedly, the `rmbs-tee` systemd unit deliberately has **no
+`EnvironmentFile`**: the TEE reads its keys from the persisted `tee/kd/*.json` files (the
+`TEE_PRIVATE_KEY` / `ENCLAVE_ENC_SECRET` env vars are optional overrides), so a bare
+environment yields the same keys and a stable `TEE_ADDRESS` — do not add an `EnvironmentFile`
+that could override them.
 
 ### The single most fragile thing: the cross-language signing seam
 
