@@ -31,17 +31,12 @@ down: ## teammate: stop local processes (leaves shared infra running)
 status: ## show tracked processes + chain/TEE reachability
 	@bash ops/status.sh
 
-demo: ## submit a request and read the result (override IAF=/PAF=)
+demo: ## submit a request, wait, print + archive the result to demo-results/ (override IAF=/PAF=)
 	@source .venv/bin/activate && set -a && source .env && set +a && \
 	  ID=$$(python submit_request.py --iaf $(IAF) --paf $(PAF) | tee /dev/stderr \
 	        | grep -oE 'id=[0-9]+' | head -1 | cut -d= -f2) && \
 	  { [ -n "$$ID" ] || { echo "make demo: could not extract request id — see submit output above"; exit 1; }; } && \
-	  echo "waiting for the DON to finalize id=$$ID (async attestation; polling up to ~90s)..." && \
-	  for i in $$(seq 1 30); do \
-	    python read_result.py $$ID | grep -q 'finalized=True' && break; \
-	    sleep 3; \
-	  done; \
-	  python read_result.py $$ID
+	  python demo_record.py $$ID --iaf $(IAF) --paf $(PAF)
 
 infra-up: ## owner: start shared instances + remote TEE
 	@bash ops/infra_up.sh
