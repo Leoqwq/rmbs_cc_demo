@@ -94,12 +94,13 @@ Run every `make` command from the repo root (where the `Makefile` is), and run t
 person at a time — the VMs and oracle keys are shared.
 
 ### What each step does
-`make up` opens the two IAP tunnels (chain RPC + TEE, bound to `127.0.0.1`), gates on chain
-+ TEE health, then starts the decryption-DON nodes and the oracle-DON agents locally (one
-per `ORACLE_KEYS` entry), tracking PIDs/logs in `.run/`. `make demo` encrypts the inputs
-client-side, submits the ciphertext (plaintext never goes on-chain), waits for the m-of-n
-oracle quorum, prints the result, and archives it to `demo-results/`. `make result ID=N`
-reads any finalized result back from the chain.
+- **`make up`** opens the two IAP tunnels (chain RPC + TEE, bound to `127.0.0.1`), gates on
+  chain and TEE health, then starts the decryption-DON nodes and the oracle-DON agents
+  locally (one per `ORACLE_KEYS` entry), tracking PIDs/logs in `.run/`.
+- **`make demo`** encrypts the inputs client-side, submits the ciphertext (plaintext never
+  goes on-chain), waits for the m-of-n oracle quorum, prints the result, and archives it to
+  `demo-results/`.
+- **`make result ID=N`** reads any finalized result back from the chain.
 
 ## Verify
 The on-chain `resultJson` must equal a local run of the engine on the same
