@@ -42,11 +42,12 @@ end. Most failures are environment/ordering issues, not code bugs.
 ## TEE / enclave
 
 - **TEE unreachable at `127.0.0.1:8000`** → the TEE tunnel isn't open. `make up` opens it;
-  `make sync`/`make doctor` do **not**. The TEE itself runs on `tee-node` (started by
-  `make infra-up`, in a `tmux` session so it survives SSH/tunnel drops).
-- **`[4003] Failed to connect to port 22` during `make infra-up`** → a freshly-started
-  `tee-node` isn't SSH-ready for ~30–60s after boot. `make infra-up` retries through this
-  window; if it ever exhausts the retries, wait ~30s and re-run.
+  `make sync`/`make doctor` do **not**. The TEE itself runs on `tee-node` as the `rmbs-tee`
+  systemd service (auto-starts on boot — see the service bullets below).
+- **`[4003] Failed to connect to port 22`** running an owner `make tee-install`/`tee-deploy`/
+  `tee-restart`/`tee-logs` → a freshly-started `tee-node` isn't SSH-ready for ~30–60s after
+  boot. Wait ~30s and re-run. (`make infra-up` no longer SSHes to `tee-node`, so it isn't
+  affected.)
 - **`bad TEE sig` / TEE signature verification fails** → most often the enclave receiving
   key was regenerated but `keygen` wasn't re-run, so the kfrags no longer match the enclave
   pubkey. Re-run `make bootstrap` (it re-keygens when the umbral state no longer matches the
