@@ -1,6 +1,11 @@
 """Read-only preflight checks (spec §9 + prerequisites). Never mutates state. Prints a
 pass/fail report and exits nonzero if any check fails, so `make sync` can chain it.
+
+  python doctor.py               # full: tooling + config + runtime reachability (after 'make up')
+  python doctor.py --config-only # tooling + config only (skip TEE/decryption-node reachability;
+                                 #   used by 'make sync', which runs BEFORE tunnels/nodes exist)
 """
+import argparse
 import os
 import shutil
 import sys
@@ -48,8 +53,13 @@ def format_report(results):
     return "\n".join(lines + ["", f"{passed}/{len(results)} checks passed{suffix}"])
 
 
-def run_all(env):
+def run_all(env, runtime=True):
+    """Tooling + config checks always; runtime reachability (TEE, decryption nodes) only
+    when runtime=True. 'make sync' passes runtime=False — it runs before 'make up' opens
+    the tunnels and starts the local nodes, so those checks would always (falsely) FAIL."""
     results = [check_tool("gcloud", "gcloud"), check_env_keys(env), check_rpc_configured(env)]
+    if not runtime:
+        return results
     tee = env.get("TEE_URL", "").rstrip("/")
     if tee:
         results.append(check_url("TEE service", tee + "/tee_address"))
@@ -59,9 +69,13 @@ def run_all(env):
     return results
 
 
-def main():
+def main(argv=None):
+    p = argparse.ArgumentParser(description="Read-only preflight checks.")
+    p.add_argument("--config-only", action="store_true",
+                   help="skip TEE/decryption-node reachability (for use before 'make up')")
+    args = p.parse_args(argv)
     load_dotenv()
-    results = run_all(dict(os.environ))
+    results = run_all(dict(os.environ), runtime=not args.config_only)
     print(format_report(results))
     return 0 if all(r["ok"] for r in results) else 1
 

@@ -20,5 +20,9 @@ cp "$TMP/ConfidentialCompute.json" "$ROOT/out/ConfidentialCompute.sol/Confidenti
 
 # Shared values are the source of truth -> --force, but config_env still backs up .env first.
 python config_env.py merge --from "$TMP/members.env" --into "$ROOT/.env" --force
-log "config merged into .env (backup written). Running doctor..."
-python doctor.py || warn "doctor reported failures — fix the FAILs above before 'make up'."
+log "config merged into .env (backup written). Checking tooling + config..."
+# config-only: sync runs BEFORE 'make up', so TEE/decryption-node reachability can't pass
+# yet — checking them here would always false-alarm. 'make doctor' (full) is for after up.
+python doctor.py --config-only \
+  && log "sync complete — config looks good. Next: 'make up', then 'make doctor'." \
+  || warn "config check found problems above — fix them before 'make up'."

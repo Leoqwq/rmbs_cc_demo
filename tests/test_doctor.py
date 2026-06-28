@@ -46,3 +46,11 @@ def test_check_rpc_configured():
     assert doctor.check_rpc_configured({"RPC_URLS": "http://x"})["ok"] is True
     assert doctor.check_rpc_configured({"RPC_URL": "http://x"})["ok"] is True
     assert doctor.check_rpc_configured({})["ok"] is False
+
+
+def test_run_all_config_only_skips_runtime_checks():
+    env = {"TEE_URL": "http://x", "DECRYPTION_NODE_URLS": "http://y"}
+    names = [r["name"] for r in doctor.run_all(env, runtime=False)]
+    assert "TEE service" not in names
+    assert not any(n.startswith("decryption node") for n in names)
+    assert ".env keys" in names and "RPC endpoint" in names
