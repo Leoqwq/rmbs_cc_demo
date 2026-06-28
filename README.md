@@ -40,6 +40,27 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Everyone also needs the Google Cloud CLI, authenticated as the account the owner granted
+access to (first time using gcloud):
+```bash
+# 1. Install the CLI — macOS: `brew install --cask gcloud-cli`
+#    others: https://cloud.google.com/sdk/docs/install
+gcloud --version                 # confirm it's installed
+
+# 2. Log in (opens a browser)
+gcloud auth login
+
+# 3. (optional) make it your default project — the ops scripts pin it regardless
+gcloud config set project rmbs-495107
+
+# 4. Smoke-test access — should list the project's VMs (they may be STOPPED)
+gcloud compute instances list --project=rmbs-495107
+```
+The owner must have granted your Google account: a start/stop-instances role (or *Compute
+Instance Admin*), *Compute OS Login*, *IAP-secured Tunnel User*, and *Service Account User*.
+Your first `gcloud compute ssh`/`scp` (run by `make sync` / `make up`) auto-provisions your
+OS Login user and generates an SSH key — no manual key setup needed.
+
 **Teammates stop here.** `make sync` populates `.env` (plus the contract ABI and umbral
 state) from the shared deployment — do **not** create or hand-fill `.env`, and you don't
 need Foundry.
