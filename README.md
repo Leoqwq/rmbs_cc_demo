@@ -24,26 +24,34 @@ encryption / decryption-DON design (and `…/2026-06-03-rmbs-cc-waterfall-demo-d
 for the base waterfall demo), `private_chain/TEE.md` (in the RMBS vault) for the TEE VM,
 and **`docs/TROUBLESHOOTING.md`** for operational gotchas + troubleshooting.
 
+> **Two audiences.** Everything from here through **Robustness** is the **teammate guide** —
+> what you need to run the demo against the already-deployed shared infrastructure. Standing
+> up that infrastructure, onboarding teammates, and operating the TEE are collected in the
+> **[Owner](#owner--managing-the-shared-deployment)** section at the end; teammates can ignore it.
+
+---
+
+# Teammate guide
+
 ## Prerequisites
-- Local: Python 3.10+ and a working `.venv` (see Setup); an authenticated `gcloud` with
-  IAP access. Foundry (`forge`) is needed only by the infra **owner** (deploy/build);
-  teammates who `make sync` an existing deployment do not need it.
-- `tee-node` (Ubuntu, owner one-time): `sudo apt-get install -y python3-venv python3-pip tmux`.
-- The Besu chain and the `tee-node` confidential VM started (both are stopped by
-  default to control cost) — `make infra-up` does this.
+- Python 3.10+ (Setup creates a `.venv`).
+- macOS or Linux — the tooling is Bash + `make` + `gcloud` (on Windows, use WSL).
+- The Google Cloud CLI, authenticated (Setup), with IAM the **owner** has granted you:
+  start/stop the shared instances, open IAP tunnels, and SSH to `tee-node`.
+- You do **not** need Foundry, and you do **not** hand-edit `.env` — `make sync` pulls the
+  contract ABI and the full config from the shared deployment.
 
 ## Setup
 
-Everyone — `cd` into the cloned repo (all `make` / `python` commands below run from the repo
-root), then create the Python environment:
+`cd` into the cloned repo (every `make` / `python` command runs from the repo root), then
+create the Python environment:
 ```bash
 cd rmbs_cc_demo                      # the repo root — every make/python command runs from here
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Everyone also needs the Google Cloud CLI, authenticated as the account the owner granted
-access to (first time using gcloud):
+Install + authenticate the Google Cloud CLI (first time using gcloud):
 ```bash
 # 1. Install the CLI — macOS: `brew install --cask gcloud-cli`
 #    others: https://cloud.google.com/sdk/docs/install
@@ -58,33 +66,16 @@ gcloud config set project rmbs-495107
 # 4. Smoke-test access — should list the project's VMs (they may be STOPPED)
 gcloud compute instances list --project=rmbs-495107
 ```
-The owner must have granted your Google account: a start/stop-instances role (or *Compute
-Instance Admin*), *Compute OS Login*, *IAP-secured Tunnel User*, and *Service Account User*.
-Your first `gcloud compute ssh`/`scp` (run by `make sync` / `make up`) auto-provisions your
-OS Login user and generates an SSH key — no manual key setup needed.
-
-**Teammates stop here.** `make sync` populates `.env` (plus the contract ABI and umbral
-state) from the shared deployment — do **not** create or hand-fill `.env`, and you don't
-need Foundry.
-
-**Owner only**, for a fresh/standalone deployment (teammates skip this): install Foundry,
-then
-```bash
-cp .env.example .env   # fill in DEPLOYER_PRIVATE_KEY etc. (see the comments in the file)
-forge install foundry-rs/forge-std
-forge build
-```
-followed by `make tee-install` → `make bootstrap` → `make publish-config` (see Quick start).
+The owner must have granted your Google account the roles listed under
+[Owner → Onboard a teammate](#onboard-a-teammate-iam). Your first `gcloud compute ssh`/`scp`
+(run by `make sync` / `make up`) auto-provisions your OS Login user and generates an SSH key —
+no manual key setup needed. `make sync` then populates `.env` + ABI + umbral state from the
+shared deployment, so you never create or hand-fill `.env`.
 
 ## Quick start (make)
 
-Teammates sharing the existing cloud deployment. Prerequisites: a working `.venv` (see Setup
-above if missing); an authenticated `gcloud` (`gcloud auth login` — the ops scripts pin the
-GCP project, so you don't need to set it); and IAM to **start/stop the instances, open IAP
-tunnels, and SSH to `tee-node`** (`make sync`/`make up` scp from / port-forward to it — if the
-project enforces OS Login you also need `roles/compute.osLogin`). The shared VMs are stopped by
-default to save cost, so a session bookends with `infra-up` / `infra-down` (the TEE auto-starts
-on boot, so no SSH is needed to bring it up):
+The shared VMs are stopped by default to save cost, so a session bookends with `infra-up` /
+`infra-down` (the TEE auto-starts on boot, so no SSH is needed to bring it up):
 ```bash
 make sync       # one-time per machine: pull shared config + ABI + umbral state, run doctor
 make infra-up   # start the shared cloud VMs (wait ~1 min; the TEE auto-starts on boot)
@@ -102,21 +93,13 @@ make result ID=10  # read a finalized result back from the chain by request id
 Run every `make` command from the repo root (where the `Makefile` is), and run the demo one
 person at a time — the VMs and oracle keys are shared.
 
-One-time **owner** setup, before teammates can `sync`/run: `make tee-install` (install the
-`rmbs-tee` systemd service on `tee-node`), `make bootstrap` (deploy contract, keygen, fund —
-idempotent), `make publish-config` (push the member config bundle). Updating TEE code later:
-`make tee-deploy` (then `make tee-restart` / `make tee-logs`). `make help` lists every target;
-operational gotchas + troubleshooting live in `docs/TROUBLESHOOTING.md`.
-
 ### What each step does
 `make up` opens the two IAP tunnels (chain RPC + TEE, bound to `127.0.0.1`), gates on chain
 + TEE health, then starts the decryption-DON nodes and the oracle-DON agents locally (one
 per `ORACLE_KEYS` entry), tracking PIDs/logs in `.run/`. `make demo` encrypts the inputs
 client-side, submits the ciphertext (plaintext never goes on-chain), waits for the m-of-n
 oracle quorum, prints the result, and archives it to `demo-results/`. `make result ID=N`
-reads any finalized result back from the chain. The owner's `make bootstrap` performs the
-one-time provisioning (deploy, keygen, oracle funding) and is a no-op once done; the
-mechanics of each are in the design spec referenced above.
+reads any finalized result back from the chain.
 
 ## Verify
 The on-chain `resultJson` must equal a local run of the engine on the same
@@ -140,11 +123,6 @@ compute path:
   per validator on distinct local ports, e.g. `validator-1→8545`,
   `validator-2→8546`). Each oracle agent and the CLIs connect to the first
   reachable endpoint and fail over on transport errors.
-  ```bash
-  gcloud compute start-iap-tunnel validator-1 8545 --local-host-port=127.0.0.1:8545 --zone=us-central1-a
-  gcloud compute start-iap-tunnel validator-2 8545 --local-host-port=127.0.0.1:8546 --zone=us-central1-b
-  gcloud compute start-iap-tunnel validator-3 8545 --local-host-port=127.0.0.1:8547 --zone=us-central1-c
-  ```
 - **Idempotent + resumable agents** — each oracle agent persists its progress
   (last scanned block + attested request ids) to `oracle_state_<id>.json`. On
   restart it resumes from the last block and checks `hasAttested` and `getResult`
@@ -160,6 +138,54 @@ compute path:
 Not yet redundant: the **TEE itself is a single node**. Surviving a TEE outage
 needs multiple TEEs + quorum (whitepaper's compute-enclave pool) — a separate,
 cloud-cost-incurring step.
+
+---
+
+# Owner — managing the shared deployment
+
+**Teammates can skip this section.** It covers standing up the shared infrastructure,
+onboarding teammates, and operating the TEE. Everything here needs Foundry locally and sudo
+on `tee-node`; the owner's `.env` is the source of truth (its secrets are distributed to
+teammates by `make publish-config` → `make sync`).
+
+## Stand up a fresh / standalone deployment
+First-time `tee-node` provisioning is a one-time manual step on the node: `sudo apt-get
+install -y python3-venv python3-pip tmux`, create the venv in `~/rmbs_cc_demo`, and copy the
+repo (`tee/`, `abi_digest.py`, `umbral_io.py`, `requirements.txt`) onto it. Then, locally:
+```bash
+cp .env.example .env                       # fill DEPLOYER_PRIVATE_KEY etc. (see the comments)
+forge install foundry-rs/forge-std && forge build
+make infra-up        # start the shared VMs
+make tee-install     # install + enable the rmbs-tee systemd service on tee-node (auto-start on boot)
+make bootstrap       # deploy contract + keygen + fund oracles (idempotent — no-op once done)
+make publish-config  # publish the member bundle to /opt/rmbs-share on tee-node
+```
+After `publish-config`, teammates can `make sync`. `make bootstrap` is safe to re-run; it
+only acts on what's missing/changed and is a no-op otherwise.
+
+## Onboard a teammate (IAM)
+Grant the teammate's Google account these **project** roles:
+- *Compute OS Login* — SSH into `tee-node` (the project enforces OS Login).
+- *IAP-secured Tunnel User* — open IAP tunnels.
+- *Service Account User* — `actAs` when starting instances.
+- a **start/stop instances** role. Simplest is *Compute Instance Admin (v1)*, but it also
+  grants `compute.instances.delete` — i.e. the teammate could delete `tee-node` and lose the
+  signing key (`TEE_ADDRESS` would change → contract redeploy). For least privilege, create a
+  start/stop-only custom role and grant that instead:
+  ```bash
+  gcloud iam roles create rmbsInstanceLifecycle --project=rmbs-495107 \
+    --title="RMBS Instance Start/Stop" \
+    --permissions=compute.instances.start,compute.instances.stop,compute.instances.get,compute.instances.list,compute.zones.get,compute.zones.list
+  ```
+
+## Operate / update the TEE
+- `make tee-deploy` — push updated `tee/*.py` (+ `abi_digest.py` / `umbral_io.py`) to
+  `tee-node` and restart. **Safe by construction:** copies only `.py` files, **never**
+  `tee/kd/` (copying the key dir would change `TEE_ADDRESS` and force a contract redeploy).
+- `make tee-restart` / `make tee-logs` — restart the service / tail its logs.
+- If you re-`bootstrap` in a way that changes shared state (redeploy the contract, or
+  regenerate the enclave key), re-run `make publish-config`, then **every teammate must
+  `make sync` again** to pick up the new contract address / umbral state.
 
 ## Cost
 Stop the chain and `tee-node` when done: `make infra-down` (and `make down` to stop the
